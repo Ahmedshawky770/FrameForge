@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FrameForge</title>
+  <style>
+/* ============================================================
+   LOGO VERSIONS —different versions for different purposes
+   ============================================================ */
+
+/* Main logo version for default state */
+#app-logo {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 48px;
+  height: 48px;
+  -o-object-fit: contain;
+     object-fit: contain;
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* Smaller logo version for mobile/responsive design */
+#app-logo-sm {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 32px;
+  height: 32px;
+  -o-object-fit: contain;
+     object-fit: contain;
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* Logo version for light theme */
+[data-theme="light"] #app-logo {
+  filter: invert(1) hue-rotate(180deg);
+  opacity: 0.9;
+}
+
+/* Logo version for dark theme (default) */
+:not([data-theme="light"]) #app-logo {
+  filter: none;
+  opacity: 1;
+}
+
+/* Logo version for focused state */
+#app-logo:focus {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Logo version for disabled state */
+#app-logo:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================================
+   RESPONSIVE DESIGN —different logo sizes for different screen sizes
+   ============================================================ */
+
+/* Default (desktop) - use main logo */
+@media (min-width: 1025px) {
+  #app-logo { display: block; }
+  #app-logo-sm { display: none; }
+}
+
+/* Tablet/mobile - use small logo */
+@media (max-width: 1024px) {
+  #app-logo { display: none; }
+  #app-logo-sm { display: block; }
+}
+
+/* Very small screens - even smaller logo */
+@media (max-width: 480px) {
+  #app-logo-sm {
+    top: 4px;
+    left: 4px;
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* ============================================================
+   THEME VARIANTS —different logo appearances for different themes
+   ============================================================ */
+
+/* Light theme variant */
+[data-theme="light"] #app-logo {
+  filter: invert(1) hue-rotate(180deg);
+  opacity: 0.9;
+}
+
+/* Dark theme variant (default) */
+:not([data-theme="light"]) #app-logo {
+  filter: none;
+  opacity: 1;
+}
+
+/* ============================================================
+   STATE VARIANTS —different logo appearances for different states
+   ============================================================ */
+
+/* Active/focused state */
+#app-logo:focus {
+  transform: scale(1.05);
+  transition: transform var(--transition-fast);
+}
+
+/* Hover state */
+#app-logo:hover {
+  filter: brightness(1.1);
+  transition: filter var(--transition-fast);
+}
+
+/* Disabled state */
+#app-logo:disabled {
+  opacity: 0.4;
+  filter: grayscale(100%);
+  cursor: not-allowed;
+}
+
+/* ============================================================
+   POSITIONING VARIANTS —different positioning for different UI areas
+   ============================================================ */
+
+/* Main video surface logo position */
+#video-surface #app-logo {
+  top: 8px;
+  left: 8px;
+}
+
+/* Project panel logo position */
+#project-panel #app-logo {
+  top: 8px;
+  left: 16px;
+  width: 36px;
+  height: 36px;
+}
+
+/* Export controls logo position */
+#export-controls #app-logo {
+  top: 16px;
+  left: 16px;
+  width: 36px;
+  height: 36px;
+}
+
+/* ============================================================
+   DIFFERENT LOGO VERSIONS —for different purposes
+   ============================================================ */
+
+/* 1. Main logo - for primary interface */
+.logo-main {
+  width: 48px;
+  height: 48px;
+}
+
+/* 2. Small logo - for mobile/responsive design */
+.logo-sm {
+  width: 32px;
+  height: 32px;
+}
+
+/* 3. High-contrast logo - for accessibility */
+.logo-high-contrast {
+  filter: invert(1) hue-rotate(180deg);
+  background: var(--bg);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* 4. Minimal logo - for compact interfaces */
+.logo-minimal {
+  width: 24px;
+  height: 24px;
+  top: 4px;
+  left: 4px;
+}
+
+/* ============================================================
+   EXAMPLE USAGE —how to use different logo versions
+   ============================================================ */
+
+/* Use main logo in header */
+header #app-logo { @extend #logo-main; }
+
+/* Use small logo in mobile menu */
+@media (max-width: 1024px) {
+  .mobile-menu #app-logo-sm { @extend #logo-sm; }
+}
+
+/* Use high-contrast logo for accessibility mode */
+@media (prefers-contrast: more) {
+  #app-logo { @extend #logo-high-contrast; }
+}
+
+/* Use minimal logo in compact interfaces */
+.compact-view #app-logo { @extend #logo-minimal; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <img id="app-logo" alt="Logo">
+    <img id="app-logo-sm" alt="Logo Small">
+  </div>
+</body>
+</html>

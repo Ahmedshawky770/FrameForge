@@ -1,0 +1,39 @@
+[package]
+name = "frameforge-tauri-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tauri = { workspace = true }
+frameforge-tauri-plugin-player = { path = "../../crates/tauri-plugin-player" }
+frameforge-mpv-adapter = { path = "../../crates/mpv-adapter" }
+frameforge-scrub-engine = { path = "../../crates/scrub-engine" }
+frameforge-core-types = { path = "../../crates/core-types" }
+frameforge-edit-engine = { path = "../../crates/edit-engine" }
+frameforge-export-engine = { path = "../../crates/export-engine" }
+frameforge-media-probe = { path = "../../crates/media-probe" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time", "sync"] }
+# Raw window handle for X11 XID extraction (libmpv wid embedding)
+raw-window-handle = "0.6"
+# System file dialogs
+rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
+# Base64 encoding for scrub frame data URLs
+base64 = "0.22"
+# MPRIS D-Bus integration
+zbus = { version = "6", features = ["tokio", "default"] }
+zbus_macros = { version = "6", features = ["default"] }
+futures = "0.3"
+url = "2"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[lib]
+name = "frameforge_tauri_app"
+path = "src-tauri/lib.rs"
+
+[[bin]]
+name = "frameforge-tauri-app"
+path = "src-tauri/main.rs"
