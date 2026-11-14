@@ -1,0 +1,13 @@
+[package]
+name = "frameforge-edit-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+frameforge-core-types = { path = "../core-types" }
+frameforge-media-probe = { path = "../media-probe" }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+
+[lib]
+path = "src/lib.rs"
