@@ -1,0 +1,12 @@
+[package]
+name = "frameforge-bench"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "frameforge-bench"
+path = "src/main.rs"
+
+[dependencies]
+criterion = "0.5"
+frameforge-core-types = { path = "../crates/core-types" }
