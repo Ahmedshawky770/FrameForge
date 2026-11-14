@@ -1,0 +1,14 @@
+[package]
+name = "frameforge-export-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+frameforge-core-types = { path = "../core-types" }
+frameforge-edit-engine = { path = "../edit-engine" }
+thiserror = { workspace = true }
+ffmpeg-next = { workspace = true }
+libc = "0.2"
+
+[lib]
+path = "src/lib.rs"
