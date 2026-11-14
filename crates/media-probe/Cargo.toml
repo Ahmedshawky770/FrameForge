@@ -1,0 +1,17 @@
+[package]
+name = "frameforge-media-probe"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+frameforge-core-types = { path = "../core-types" }
+ffmpeg-next = { workspace = true }
+
+[features]
+default = ["ffmpeg"]
+ffmpeg = []
+
+[lib]
+path = "src/lib.rs"
