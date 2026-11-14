@@ -1,0 +1,13 @@
+[package]
+name = "frameforge-tauri-plugin-player"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+tauri = { workspace = true }
+frameforge-core-types = { path = "../core-types" }
+frameforge-mpv-adapter = { path = "../mpv-adapter" }
+
+[lib]
+path = "src/lib.rs"
