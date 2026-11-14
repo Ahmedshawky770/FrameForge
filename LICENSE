@@ -1,0 +1,116 @@
+FrameForge — GPL-3.0-or-later with LGPL exceptions
+
+This project is licensed under the GNU General Public License v3.0 or later,
+with specific exceptions for dynamic linking against LGPL-licensed libraries.
+
+## License Summary
+
+### Your Rights
+- ✅ Commercial use
+- ✅ Modification
+- ✅ Distribution
+- ✅ Private use
+- ✅ Patent use (subject to patent grants)
+
+### Your Obligations
+- 📋 License and copyright notice
+- 📋 State changes
+- 📋 Disclose source (if distributing)
+- 📋 Same license (GPL-3.0-or-later)
+- 📋 Include install instructions (if applicable)
+
+### Exceptions (Dynamic Linking)
+FrameForge dynamically links against the following LGPL-licensed libraries.
+Per LGPL Section 6, you may use FrameForge with proprietary applications
+provided you:
+1. Use dynamic linking (shared libraries)
+2. Allow users to swap the LGPL libraries
+3. Provide build instructions for the LGPL components
+
+| Library | License | Linkage |
+|---------|---------|---------|
+| libmpv | LGPL-2.1+ | Dynamic |
+| FFmpeg (libavcodec, libavformat, libavutil, libswscale, libswresample, libavfilter) | LGPL-2.1+ / GPL-2+ | Dynamic |
+| GTK3 / WebKitGTK | LGPL-2.1+ | Dynamic |
+| libva / VAAPI | MIT / LGPL | Dynamic |
+
+### GPL Components (If Linked)
+The following are GPL-licensed and will trigger GPL if **statically linked**:
+- x264 (GPL)
+- x265 (GPL)
+- libaom (BSD-2, but patent considerations)
+
+**FrameForge does not statically link these by default.** They are accessed
+via FFmpeg's dynamic plugin system or not used (software fallback uses
+FFmpeg's internal encoders which may be LGPL depending on build config).
+
+### Codec Patents
+H.264/AVC, H.265/HEVC, and other codecs may be subject to patents in some
+jurisdictions. **Patent licensing is the responsibility of the end user
+and/or distributor in their jurisdiction.** FrameForge makes no patent
+grants or warranties.
+
+### Third-Party Components
+
+#### Rust Crates (Cargo dependencies)
+All Rust dependencies are licensed under permissive licenses (MIT, Apache-2.0,
+BSD-3, MPL-2.0, or Unicode-DFS-2016). See `Cargo.lock` for full list.
+
+#### JavaScript/Node (npm dependencies)
+| Package | License |
+|---------|---------|
+| @tauri-apps/api | MIT |
+| @tauri-apps/cli | MIT/Apache-2.0 |
+| vite | MIT |
+| hls.js (CDN) | Apache-2.0 |
+| mux.js (CDN) | BSD-3-Clause |
+
+#### System Libraries (Ubuntu 22.04)
+| Package | License |
+|---------|---------|
+| libmpv2 | LGPL-2.1+ |
+| libavcodec58, libavformat58, etc. | LGPL-2.1+ / GPL-2+ |
+| libwebkit2gtk-4.0-0 | LGPL-2.1+ |
+| libgtk-3-0 | LGPL-2.1+ |
+| libssl3 | Apache-2.0 |
+| libva-drm2, mesa-va-drivers | MIT / LGPL |
+
+## Full License Text
+
+### GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
+
+Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+Everyone is permitted to copy and distribute verbatim copies of this
+license document, but changing it is not allowed.
+
+[Full GPL-3.0 text available at: https://www.gnu.org/licenses/gpl-3.0.txt]
+
+## Exception Addendum
+
+### LGPL Dynamic Linking Exception
+
+As a special exception, the copyright holders of FrameForge give you
+permission to link FrameForge with the LGPL-licensed libraries listed above
+and distribute the resulting combined work under terms of your choice,
+provided that:
+
+1. The LGPL libraries are linked dynamically (not statically).
+2. You provide a mechanism for users to replace the LGPL libraries with
+   modified versions (e.g., by using system package manager or LD_LIBRARY_PATH).
+3. You include this exception notice in all copies of FrameForge.
+4. You do not remove or alter the LGPL license notices in the LGPL libraries.
+
+This exception applies only to the specific LGPL libraries listed above.
+It does not apply to any other GPL-licensed code that may be linked.
+
+## SPDX License Identifiers
+
+For tooling consumption:
+- Main codebase: `GPL-3.0-or-later WITH LGPL-2.1-only-dynamic-linking-exception`
+- Core crates: `GPL-3.0-or-later WITH LGPL-2.1-only-dynamic-linking-exception`
+- Web component: `GPL-3.0-or-later`
+- Specifications/docs: `CC-BY-4.0`
+
+## Contact
+
+For license questions or commercial licensing inquiries, contact the maintainers.
