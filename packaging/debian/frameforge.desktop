@@ -1,0 +1,23 @@
+[Desktop Entry]
+Name=FrameForge
+GenericName=Video Editor
+Comment=Video player/editing core library and desktop app
+Exec=frameforge %F
+Icon=frameforge
+Terminal=false
+Type=Application
+Categories=AudioVideo;AudioVideoEditing;Player;
+MimeType=video/mp4;video/mpeg;video/quicktime;video/x-matroska;video/webm;video/x-msvideo;
+Keywords=video;editor;cut;merge;trim;ffmpeg;mpv;
+StartupNotify=true
+Actions=NewProject;OpenFile;
+
+[Desktop Action NewProject]
+Name=New Project
+Exec=frameforge --new-project
+Icon=frameforge
+
+[Desktop Action OpenFile]
+Name=Open File
+Exec=frameforge --open-file
+Icon=frameforge

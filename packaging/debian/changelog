@@ -1,0 +1,6 @@
+frameforge (0.1.0) stable; urgency=medium
+
+  * Initial release of FrameForge video editor for Linux
+  * Built on Pop!_OS 22.04 LTS with Rust, Tauri 2, libmpv, FFmpeg libav*
+
+ -- FrameForge Team <team@frameforge.org>  Mon, 10 Nov 2026 10:00:00 +0000

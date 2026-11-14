@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=FrameForge
+GenericName=Video Editor
+Comment=Video player/editing core library and desktop app
+Exec=frameforge %F
+Icon=frameforge
+Terminal=false
+Type=Application
+Categories=AudioVideo;AudioVideoEditing;Player;
+MimeType=video/mp4;video/mpeg;video/quicktime;video/x-matroska;video/webm;video/x-msvideo;
+Keywords=video;editor;cut;merge;trim;ffmpeg;mpv;
+StartupNotify=true

@@ -1,0 +1,27 @@
+Package: frameforge
+Version: 0.1.0
+Section: video
+Priority: optional
+Architecture: amd64
+Depends: libmpv2 (>= 0.34), libavcodec58 (>= 7:4.4), libavformat58 (>= 7:4.4), libavutil56 (>= 7:4.4), libswscale5 (>= 7:4.4), libswresample3 (>= 7:4.4), libavfilter7 (>= 7:4.4), libwebkit2gtk-4.0-0 (>= 2.30), libgtk-3-0 (>= 3.24), libssl3, libgl1, libglib2.0-0
+Maintainer: FrameForge Team <team@frameforge.org>
+Description: Linux-first video player/editing core library and desktop app
+ FrameForge is a reusable, Linux-first video player/editing core library
+ plus a Tauri 2 desktop application. It supports playback, precision
+ scrubbing, multi-segment cut, ordered merge, and export with a
+ lossless-vs-re-encode decision engine. It ships a playback-only
+ <media-player> web component for websites and a headless CLI.
+ .
+ Platform: Linux (Pop!_OS 22.04+, GNOME/COSMIC, X11/Wayland,
+ NVIDIA/AMD/Intel GPUs).
+ .
+ Features:
+  - Play/pause/seek/speed/volume, audio tracks, subtitles (libass)
+  - Precision scrubbing with frame-accurate preview
+  - Multi-segment cut (keep/remove modes)
+  - Ordered merge with reordering and per-clip trim
+  - Export: lossless stream-copy or re-encode (VAAPI/NVENC/sw)
+  - EDL JSON project model with save/load and undo/redo
+  - Keyboard shortcuts, Arabic/RTL UI, dark/light theme
+ .
+ Homepage: https://github.com/frameforge/frameforge
