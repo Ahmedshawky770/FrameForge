@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/core-types",
+  "crates/media-probe",
+  "crates/scrub-engine",
+  "crates/edit-engine",
+  "crates/export-engine",
+  "crates/mpv-adapter",
+  "crates/hw-diagnostics",
+  "crates/tauri-plugin-player",
+  "cli",
+  "bench",
+  "apps/tauri-app",
+]
+exclude = []
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+# Core / time (pure Rust)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+chrono = "0.4"
+num-rational = "0.4"
+uuid = { version = "1", features = ["serde", "v4"] }
+
+# C-bound crates (require system dev packages, now installed: libav*, libmpv-dev)
+ffmpeg-next = { version = "9", default-features = false, features = ["codec", "filter", "format", "software-resampling", "software-scaling"] }
+ffmpeg-sys-next = { version = "9", default-features = false, features = ["avcodec", "avformat", "swscale", "swresample", "avfilter"] }
+libmpv = { version = "2" }
+
+# Tauri 2 (cargo-tauri 2.12.4 installed)
+tauri = { version = "2" }
+tauri-build = { version = "2" }
