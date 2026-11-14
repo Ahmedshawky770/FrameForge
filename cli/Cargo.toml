@@ -1,0 +1,18 @@
+[package]
+name = "frameforge-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "frameforge-cli"
+path = "src/main.rs"
+
+[dependencies]
+frameforge-core-types = { path = "../crates/core-types" }
+frameforge-media-probe = { path = "../crates/media-probe" }
+frameforge-edit-engine = { path = "../crates/edit-engine" }
+frameforge-export-engine = { path = "../crates/export-engine" }
+frameforge-hw-diagnostics = { path = "../crates/hw-diagnostics" }
+clap = { version = "4", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
