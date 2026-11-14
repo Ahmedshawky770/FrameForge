@@ -1,0 +1,16 @@
+[package]
+name = "frameforge-core-types"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+num-rational = { workspace = true }
+chrono = { workspace = true }
+ffmpeg-next = { workspace = true }
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[lib]
+path = "src/lib.rs"
