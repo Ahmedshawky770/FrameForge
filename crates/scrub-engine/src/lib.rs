@@ -67,7 +67,7 @@ pub struct ScrubSession {
     current_path: Option<std::path::PathBuf>,
     /// Current frame PTS (in stream time base) for next/prev frame navigation.
     current_pts: Option<i64>,
-    sws_cache: SwsContextCache,
+    sws_cache: SwsCache,
 }
 
 impl std::fmt::Debug for ScrubSession {
@@ -93,13 +93,8 @@ impl ScrubSession {
             time_base: None,
             current_path: None,
             current_pts: None,
-            sws_cache: SwsContextCache { cache: std::collections::HashMap::new(), max_size: 16, order: std::collections::VecDeque::new() }
+            sws_cache: SwsCache::new(),
         }
-    }
-
-    /// Get the shared SWS context cache for frame conversion.
-    pub fn get_sws_cache(&mut self) -> &mut SwsContextCache {
-        &mut self.sws_cache
     }
 
     /// Open a file and initialize the decoder. If the same file is already open,
@@ -169,20 +164,31 @@ impl ScrubSession {
     /// Seek to a timestamp using the already-open decoder/context.
     /// Call `open_file` first, or this will return an error.
     pub fn seek(&mut self, target: Timestamp) -> Result<ScrubResult> {
-        let ictx = self
-            .ictx
-            .as_mut()
-            .ok_or_else(|| FrameForgeError::Seek("no file open; call open_file first".into()))?;
-        let decoder = self
-            .decoder
-            .as_mut()
-            .ok_or_else(|| FrameForgeError::Seek("no decoder open; call open_file first".into()))?;
-        let video_stream_idx = self
-            .video_stream_idx
-            .ok_or_else(|| FrameForgeError::Seek("no video stream index; call open_file first".into()))?;
-        let time_base = self
-            .time_base
-            .ok_or_else(|| FrameForgeError::Seek("no time base; call open_file first".into()))?;
+        let Self {
+            token,
+            ictx,
+            decoder,
+            video_stream_idx,
+            time_base,
+            sws_cache,
+            current_pts,
+            ..
+        } = self;
+
+        let video_stream_idx = video_stream_idx.ok_or_else(|| {
+            FrameForgeError::Seek("no video stream index; call open_file first".into())
+        })?;
+
+        let time_base = time_base.ok_or_else(|| {
+            FrameForgeError::Seek("no time base; call open_file first".into())
+        })?;
+
+        let ictx = ictx.as_mut().ok_or_else(|| {
+            FrameForgeError::Seek("no file open; call open_file first".into())
+        })?;
+        let decoder = decoder.as_mut().ok_or_else(|| {
+            FrameForgeError::Seek("no decoder open; call open_file first".into())
+        })?;
 
         // Convert target PTS to the stream's time base.
         let target_seconds = target.to_seconds();
@@ -203,7 +209,7 @@ impl ScrubSession {
 
         let mut found = None;
         for (_stream, pkt) in ictx.packets() {
-            if self.token.is_cancelled() {
+            if token.is_cancelled() {
                 return Ok(ScrubResult {
                     target,
                     frame: None,
@@ -218,7 +224,7 @@ impl ScrubSession {
             decoder.send_packet(&pkt).ok();
 
             loop {
-                if self.token.is_cancelled() {
+                if token.is_cancelled() {
                     return Ok(ScrubResult {
                         target,
                         frame: None,
@@ -231,12 +237,12 @@ impl ScrubSession {
                         let frame_seconds = frame_pts as f64 * tb_seconds;
                         if frame_seconds >= target_seconds - 1e-6 {
                             // Found the target frame (or the first frame at/after target).
-                            let mut cache = self.get_sws_cache();
-                let data = video_frame_to_rgba(&frame, &mut cache)?;
-                            let frame_tb = Timebase::new(time_base.0 as i64, time_base.1 as i64);
-                            self.current_pts = Some(frame_pts);
+                            let out_w = frame.width();
+                            let out_h = frame.height();
+                            let data = video_frame_to_rgba(&frame, sws_cache, out_w, out_h)?;
+                            *current_pts = Some(frame_pts);
                             found = Some(DecodedFrame {
-                                pts: Timestamp::new(frame_pts, frame_tb),
+                                pts: Timestamp::new(frame_pts, Timebase::new(time_base.0 as i64, time_base.1 as i64)),
                                 width: frame.width(),
                                 height: frame.height(),
                                 data,
@@ -304,6 +310,8 @@ impl ScrubSession {
         let time_base = self
             .time_base
             .ok_or_else(|| FrameForgeError::Seek("no time base; call open_file first".into()))?;
+
+        let _tb_seconds = time_base.0 as f64 / time_base.1 as f64;
         let mut frame = ffmpeg_next::util::frame::Video::empty();
 
         // Continue decoding from current position.
@@ -324,10 +332,10 @@ impl ScrubSession {
                 match decoder.receive_frame(&mut frame) {
                     Ok(_) => {
                         let frame_pts = frame.pts().unwrap_or(0);
-                        let mut cache = self.get_sws_cache();
-                let data = video_frame_to_rgba(&frame, &mut cache)?;
+                        let out_w = frame.width();
+                        let out_h = frame.height();
+                        let data = video_frame_to_rgba(&frame, &mut self.sws_cache, out_w, out_h)?;
                         let frame_tb = Timebase::new(time_base.0 as i64, time_base.1 as i64);
-                        self.current_pts = Some(frame_pts);
                         return Ok(Some(DecodedFrame {
                             pts: Timestamp::new(frame_pts, frame_tb),
                             width: frame.width(),
@@ -426,8 +434,9 @@ impl ScrubSession {
                         }
 
                         // Store this frame as potential previous frame.
-                        let mut cache = self.get_sws_cache();
-                let data = video_frame_to_rgba(&frame, &mut cache)?;
+                        let out_w = frame.width();
+                        let out_h = frame.height();
+                        let data = video_frame_to_rgba(&frame, &mut self.sws_cache, out_w, out_h)?;
                         let frame_tb = Timebase::new(time_base.0 as i64, time_base.1 as i64);
                         prev_frame_data = Some(DecodedFrame {
                             pts: Timestamp::new(frame_pts, frame_tb),
@@ -453,59 +462,61 @@ impl ScrubSession {
     }
 }
 
-/// Cache for SWS (software scaler) contexts to avoid recreating them every frame.
-/// Contexts are keyed on (width, height, format_i32) and have a size limit with
-/// LRU eviction to keep memory bounded.
-struct SwsContextCache {
-    cache: std::collections::HashMap<(u32, u32, i32), ffmpeg_next::software::scaling::Context>,
-    max_size: usize,
-    order: std::collections::VecDeque<(u32, u32, i32)>,
-}
+/// A thread-safe handle to an FFmpeg `SwsContext` software scaler.
+///
+/// `ffmpeg_next::software::scaling::Context` wraps `*mut SwsContext`, a raw
+/// pointer, so it is neither `Send` nor `Sync` by default. This newtype
+/// manually implements both markers. That is sound because:
+///
+///   * Ownership is never shared between threads: `Send` is safe since the
+///     pointer is just an address and FFmpeg does not bind a scaler to the
+///     thread that created it.
+///   * All mutation goes through `&mut self` (e.g. `run`), which Rust enforces,
+///     and the tauri layer serializes every access behind `Mutex<ScrubState>`,
+///     so `&Self` can never observe unsynchronized mutation (`Sync`).
+struct SwsContextHandle(ffmpeg_next::software::scaling::Context);
 
-impl SwsContextCache {
-    pub fn new(max_size: usize) -> Self {
-        Self {
-            cache: std::collections::HashMap::new(),
-            max_size,
-            order: std::collections::VecDeque::new(),
-        }
+// SAFETY: See the safety comment on `SwsContextHandle`.
+unsafe impl Send for SwsContextHandle {}
+unsafe impl Sync for SwsContextHandle {}
+
+impl SwsContextHandle {
+    pub fn get(
+        src_format: ffmpeg_next::format::Pixel,
+        src_w: u32,
+        src_h: u32,
+        dst_format: ffmpeg_next::format::Pixel,
+        dst_w: u32,
+        dst_h: u32,
+        flags: ffmpeg_next::software::scaling::Flags,
+    ) -> std::result::Result<Self, ffmpeg_next::Error> {
+        ffmpeg_next::software::scaling::Context::get(
+            src_format, src_w, src_h, dst_format, dst_w, dst_h, flags,
+        )
+        .map(Self)
     }
 
-    pub fn get_or_create(
+    pub fn run(
         &mut self,
-        src_format: ffmpeg_next::format::Pixel,
-        src_width: u32,
-        src_height: u32,
-    ) -> std::result::Result<&ffmpeg_next::software::scaling::Context, FrameForgeError> {
-        let key = (src_width, src_height, src_format as i32);
+        input: &ffmpeg_next::frame::Video,
+        output: &mut ffmpeg_next::frame::Video,
+    ) -> std::result::Result<(), ffmpeg_next::Error> {
+        self.0.run(input, output)
+    }
+}
 
-        if let Some(cached) = self.cache.get(&key) {
-            if let Some(pos) = self.order.iter().position(|k| *k == key) {
-                let _ = self.order.remove(pos);
-            }
-            self.order.push_back(key);
-            Ok(cached)
-        } else {
-            if self.cache.len() >= self.max_size {
-                if let Some(lru_key) = self.order.pop_front() {
-                    self.cache.remove(&lru_key);
-                }
-            }
+/// Cache for a single SWS (software scaler) context to avoid recreating it per frame.
+/// The context is keyed on (src_w, src_h, src_fmt_i32, out_w, out_h) and reused across frames.
+struct SwsCache {
+    ctx: Option<SwsContextHandle>,
+    key: Option<(u32, u32, i32, u32, u32)>, // src w,h,fmt + dst w,h
+}
 
-            let new_ctx = ffmpeg_next::software::scaling::Context::get(
-                src_format,
-                src_width,
-                src_height,
-                ffmpeg_next::format::Pixel::RGBA,
-                src_width,
-                src_height,
-                ffmpeg_next::software::scaling::Flags::FAST_BILINEAR,
-            )
-            .map_err(|_| FrameForgeError::Seek("swscale context creation failed".into()))?;
-
-            self.cache.insert(key, new_ctx.clone());
-            self.order.push_back(key);
-            Ok(self.cache.get(&key).unwrap())
+impl SwsCache {
+    pub fn new() -> Self {
+        Self {
+            ctx: None,
+            key: None,
         }
     }
 }
@@ -513,46 +524,47 @@ impl SwsContextCache {
 /// Convert a ffmpeg-next Video frame to raw RGBA bytes using swscale.
 /// Uses a cached SWS context to avoid recreating it per frame — essential for
 /// real-time scrubbing performance.
-fn video_frame_to_rgba(frame: &ffmpeg_next::util::frame::Video, cache: &mut SwsContextCache) -> Result<Vec<u8>> {
+fn video_frame_to_rgba(
+    frame: &ffmpeg_next::util::frame::Video,
+    cache: &mut SwsCache,
+    out_w: u32,
+    out_h: u32,
+) -> std::result::Result<Vec<u8>, FrameForgeError> {
     let src_width = frame.width();
     let src_height = frame.height();
-    let src_format = frame.format();
+    let src_pixel = frame.format();
+    let src_format = src_pixel as i32;
+    let key = (src_width, src_height, src_format, out_w, out_h);
 
-    let mut sws = ffmpeg_next::software::scaling::Context::get(
-        src_format,
-        src_width,
-        src_height,
-        ffmpeg_next::format::Pixel::RGBA,
-        src_width,
-        src_height,
-        Flags::FAST_BILINEAR,
-    )
-    .map_err(|_| FrameForgeError::Seek("swscale context creation failed".into()))?;
-
-    let mut rgba_frame = ffmpeg_next::util::frame::Video::new(
-        ffmpeg_next::format::Pixel::RGBA,
-        src_width,
-        src_height,
-    );
-
-    sws.run(frame, &mut rgba_frame)
-        .map_err(|e| FrameForgeError::Seek(format!("swscale run failed: {e}")))?;
-
-    let data = unsafe {
-        let planes = rgba_frame.data(0);
-        let stride = rgba_frame.stride(0);
-        let height = rgba_frame.height() as usize;
-        let mut out = Vec::with_capacity(stride * height);
-        for row in 0..height {
-            let row_ptr = planes.as_ptr().add(row * stride);
-            out.extend_from_slice(std::slice::from_raw_parts(row_ptr, stride));
-        }
-        out
-    };
-
-    Ok(data)
+    if cache.ctx.is_none() || cache.key != Some(key) {
+        cache.ctx = Some(
+            SwsContextHandle::get(
+                src_pixel,
+                src_width,
+                src_height,
+                ffmpeg_next::format::Pixel::RGBA,
+                out_w,
+                out_h,
+                ffmpeg_next::software::scaling::Flags::FAST_BILINEAR,
+            )
+            .map_err(|e| FrameForgeError::Probe(format!("sws create failed: {e}")))?,
+        );
+        cache.key = Some(key);
+    }
+    let scaler = cache.ctx.as_mut().unwrap();
+    let mut rgba = ffmpeg_next::frame::Video::empty();
+    scaler.run(frame, &mut rgba)
+        .map_err(|e| FrameForgeError::Probe(format!("sws run failed: {e}")))?;
+    // نسخ صف صف (الـ stride فيه padding)
+    let stride = rgba.stride(0);
+    let row = out_w as usize * 4;
+    let data = rgba.data(0);
+    let mut out = Vec::with_capacity(row * out_h as usize);
+    for y in 0..out_h as usize {
+        out.extend_from_slice(&data[y * stride..y * stride + row]);
+    }
+    Ok(out)
 }
-
 impl Default for ScrubSession {
     fn default() -> Self {
         Self::new()
