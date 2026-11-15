@@ -1,9 +1,7 @@
-use crate::state::{
-    CompatibilityInfo, ExportState,
-};
+use crate::state::{CompatibilityInfo, ExportState};
 use frameforge_core_types::{
     Clip, Container, Edl, ExportMode, ExportSettings, ItemId, Segment, SourceId, TimeRange,
-    Timebase, Timestamp, TimelineItem, Track, TrackKind,
+    Timebase, TimelineItem, Timestamp, Track, TrackKind,
 };
 use frameforge_edit_engine::{analyze_compatibility, plan_export, validate_edl};
 use frameforge_export_engine::{
@@ -60,16 +58,16 @@ pub struct ImportSegment {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ImportTrack {
-    pub kind: String,   // "video" | "audio" | "subtitle"
+    pub kind: String, // "video" | "audio" | "subtitle"
     pub enabled: bool,
     pub index: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ImportExportSettings {
-    pub mode: String,        // "stream-copy" | "reencode"
+    pub mode: String, // "stream-copy" | "reencode"
     pub preset: String,
-    pub container: String,   // "mp4" | "mkv" | "ts"
+    pub container: String, // "mp4" | "mkv" | "ts"
     pub vcodec: Option<String>,
     pub acodec: Option<String>,
     pub width: Option<u32>,
@@ -88,7 +86,7 @@ impl ImportEdl {
         for (clip_idx, clip) in self.clips.into_iter().enumerate() {
             let mut segments = Vec::with_capacity(clip.segments.len());
             for (seg_idx, seg) in clip.segments.into_iter().enumerate() {
-                if !(seg.end > seg.start) {
+                if seg.end <= seg.start {
                     return Err(format!(
                         "clip {} segment {}: end ({}) must be after start ({})",
                         clip_idx, seg_idx, seg.end, seg.start
@@ -138,7 +136,11 @@ impl ImportEdl {
                     enabled: t.enabled,
                     index: t.index.or(Some(i as u32)),
                     name: format!("Track {}", i + 1),
-                    height: if matches!(kind, TrackKind::Video) { 80.0 } else { 60.0 },
+                    height: if matches!(kind, TrackKind::Video) {
+                        80.0
+                    } else {
+                        60.0
+                    },
                     muted: false,
                     solo: false,
                     locked: false,
@@ -152,7 +154,10 @@ impl ImportEdl {
         // validate_edl / plan_export see enabled items and can compute cut
         // points.  The source_range keeps the original source in/out points;
         // timeline_start accumulates so items do not overlap.
-        if let Some(video_track) = tracks.iter_mut().find(|t| matches!(t.kind, TrackKind::Video)) {
+        if let Some(video_track) = tracks
+            .iter_mut()
+            .find(|t| matches!(t.kind, TrackKind::Video))
+        {
             let mut timeline_cursor = 0.0f64;
             for clip in &clips {
                 for seg in &clip.segments {
@@ -217,32 +222,43 @@ fn seconds_to_timestamp(seconds: f64) -> Timestamp {
 #[command]
 pub async fn project_compatibility(clip_paths: Vec<String>) -> Result<CompatibilityInfo, String> {
     // Build tracks from clips for compatibility check
-    let mut tracks = vec![
-        frameforge_core_types::Track {
-            kind: frameforge_core_types::TrackKind::Video,
-            enabled: true,
-            index: Some(0),
-            name: "Video".into(),
-            height: 80.0,
-            muted: false,
-            solo: false,
-            locked: false,
-            items: Vec::new(),
-        },
-    ];
-    
+    let mut tracks = vec![frameforge_core_types::Track {
+        kind: frameforge_core_types::TrackKind::Video,
+        enabled: true,
+        index: Some(0),
+        name: "Video".into(),
+        height: 80.0,
+        muted: false,
+        solo: false,
+        locked: false,
+        items: Vec::new(),
+    }];
+
     // Add items to track
     for (i, path) in clip_paths.iter().enumerate() {
         tracks[0].items.push(frameforge_core_types::TimelineItem {
             id: frameforge_core_types::ItemId(i as u64),
             source_id: frameforge_core_types::SourceId(i as u64),
-            name: std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy().to_string(),
+            name: std::path::Path::new(path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
             path: PathBuf::from(path),
             source_range: frameforge_core_types::TimeRange::new(
-                frameforge_core_types::Timestamp::new(0, frameforge_core_types::Timebase::new(1, 1_000_000)),
-                frameforge_core_types::Timestamp::new(86_400_000_000, frameforge_core_types::Timebase::new(1, 1_000_000)),
+                frameforge_core_types::Timestamp::new(
+                    0,
+                    frameforge_core_types::Timebase::new(1, 1_000_000),
+                ),
+                frameforge_core_types::Timestamp::new(
+                    1_000_000,
+                    frameforge_core_types::Timebase::new(1, 1_000_000),
+                ),
             ),
-            timeline_start: frameforge_core_types::Timestamp::new(0, frameforge_core_types::Timebase::new(1, 1_000_000)),
+            timeline_start: frameforge_core_types::Timestamp::new(
+                0,
+                frameforge_core_types::Timebase::new(1, 1_000_000),
+            ),
             track_index: 0,
             transition_in: None,
             transition_out: None,
@@ -288,7 +304,8 @@ pub async fn project_export(
     quality_preset: String,
 ) -> Result<(), String> {
     // 1. Parse EDL using the import DTO (accepts f64 seconds from the frontend).
-    let import_edl: ImportEdl = from_str(&edl_json).map_err(|e| format!("edl parse failed: {e}"))?;
+    let import_edl: ImportEdl =
+        from_str(&edl_json).map_err(|e| format!("edl parse failed: {e}"))?;
     let edl = import_edl.into_edl()?;
 
     // 2. Validate the EDL (non-overlapping segments, monotonic times).
@@ -327,32 +344,29 @@ pub async fn project_export(
 
     // 6. Run the blocking ffmpeg pipeline on the blocking thread pool.
     tokio::task::spawn_blocking(move || -> Result<(), String> {
-            let mut executor: Box<dyn ExportExecutor + Send> =
-                if plan.merge_plan.lossless {
-                    Box::new(StreamCopyExecutor::new(edl.clips, dest.clone()))
-                } else {
-                    Box::new(ReencodeExecutor::new(
-                        edl.clips,
-                        dest.clone(),
-                        encoder_pref,
-                        quality_preset,
-                    ))
-                };
+        let mut executor: Box<dyn ExportExecutor + Send> = if plan.merge_plan.lossless {
+            Box::new(StreamCopyExecutor::new(edl.clips, dest.clone()))
+        } else {
+            Box::new(ReencodeExecutor::new(
+                edl.clips,
+                dest.clone(),
+                encoder_pref,
+                quality_preset,
+            ))
+        };
 
-            let progress = move |p: f32| {
-                if let Ok(s) = state_arc.lock() {
-                    if let Ok(mut prog) = s.progress.lock() {
-                        *prog = p;
-                    }
-                }
-            };
+        let progress = move |p: f32| {
+            if let Ok(mut s) = state_arc.lock() {
+                s.progress = p;
+            }
+        };
 
-            executor
-                .run(&plan, &progress, &cancel_token)
-                .map_err(|e| e.to_string())
-        })
-        .await
-        .map_err(|e| format!("export task failed: {e}"))??;
+        executor
+            .run(&plan, &progress, &cancel_token)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("export task failed: {e}"))??;
 
     Ok(())
 }
@@ -373,8 +387,7 @@ pub async fn project_export_progress(
     export_state: State<'_, Arc<Mutex<ExportState>>>,
 ) -> Result<f32, String> {
     let s = export_state.lock().map_err(|e| e.to_string())?;
-    let p = s.progress.lock().map_err(|e| e.to_string())?;
-    Ok(*p)
+    Ok(s.progress)
 }
 
 /// Open a save file dialog for choosing the export destination.
@@ -455,7 +468,8 @@ pub async fn project_delete_ranges(
     duration: f64,
     delete_ranges: Vec<(f64, f64)>,
 ) -> Result<String, String> {
-    let source_path = source_path.ok_or_else(|| "source_path is required — load a video first".to_string())?;
+    let source_path =
+        source_path.ok_or_else(|| "source_path is required — load a video first".to_string())?;
     if source_path.is_empty() {
         return Err("source_path is empty — load a video first".into());
     }
@@ -468,7 +482,7 @@ pub async fn project_delete_ranges(
         .filter(|(s, e)| e > s && *s >= 0.0 && *e <= duration)
         .cloned()
         .collect();
-    ranges.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    ranges.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
     // Merge overlapping ranges
     let mut merged: Vec<(f64, f64)> = Vec::new();
@@ -566,19 +580,36 @@ mod tests {
                     id: 1,
                     path: "/tmp/a.mp4".into(),
                     segments: vec![
-                        ImportSegment { start: 0.0, end: 5.5 },
-                        ImportSegment { start: 10.25, end: 15.75 },
+                        ImportSegment {
+                            start: 0.0,
+                            end: 5.5,
+                        },
+                        ImportSegment {
+                            start: 10.25,
+                            end: 15.75,
+                        },
                     ],
                 },
                 ImportClip {
                     id: 2,
                     path: "/tmp/b.mp4".into(),
-                    segments: vec![ImportSegment { start: 2.0, end: 8.0 }],
+                    segments: vec![ImportSegment {
+                        start: 2.0,
+                        end: 8.0,
+                    }],
                 },
             ],
             tracks: vec![
-                ImportTrack { kind: "video".into(), enabled: true, index: Some(0) },
-                ImportTrack { kind: "audio".into(), enabled: true, index: Some(1) },
+                ImportTrack {
+                    kind: "video".into(),
+                    enabled: true,
+                    index: Some(0),
+                },
+                ImportTrack {
+                    kind: "audio".into(),
+                    enabled: true,
+                    index: Some(1),
+                },
             ],
             export: ImportExportSettings {
                 mode: "stream-copy".into(),
@@ -609,7 +640,9 @@ mod tests {
 
     #[test]
     fn import_edl_into_edl_valid() {
-        let edl = sample_import_edl().into_edl().expect("valid import should convert");
+        let edl = sample_import_edl()
+            .into_edl()
+            .expect("valid import should convert");
 
         assert_eq!(edl.version, 1);
         assert_eq!(edl.clips.len(), 2);
@@ -620,10 +653,7 @@ mod tests {
         assert_eq!(edl.clips[0].segments.len(), 2);
         assert_eq!(
             edl.clips[0].segments[0].range,
-            TimeRange::new(
-                Timestamp::new(0, tb()),
-                Timestamp::new(5_500_000, tb())
-            )
+            TimeRange::new(Timestamp::new(0, tb()), Timestamp::new(5_500_000, tb()))
         );
         assert_eq!(
             edl.clips[0].segments[1].range,
@@ -656,7 +686,10 @@ mod tests {
     #[test]
     fn import_edl_rejects_end_before_start() {
         let mut edl = sample_import_edl();
-        edl.clips[0].segments[0] = ImportSegment { start: 5.0, end: 2.0 };
+        edl.clips[0].segments[0] = ImportSegment {
+            start: 5.0,
+            end: 2.0,
+        };
         let err = edl.into_edl().unwrap_err();
         assert!(err.contains("end"), "error should mention end: {err}");
     }
@@ -664,7 +697,10 @@ mod tests {
     #[test]
     fn import_edl_rejects_equal_start_and_end() {
         let mut edl = sample_import_edl();
-        edl.clips[0].segments[0] = ImportSegment { start: 3.0, end: 3.0 };
+        edl.clips[0].segments[0] = ImportSegment {
+            start: 3.0,
+            end: 3.0,
+        };
         assert!(edl.into_edl().is_err());
     }
 
@@ -696,10 +732,20 @@ mod tests {
     fn import_edl_tracks_mapped_correctly() {
         let mut edl = sample_import_edl();
         edl.tracks = vec![
-            ImportTrack { kind: "subtitle".into(), enabled: true, index: None },
-            ImportTrack { kind: "VIDEO".into(), enabled: false, index: Some(5) },
+            ImportTrack {
+                kind: "subtitle".into(),
+                enabled: true,
+                index: None,
+            },
+            ImportTrack {
+                kind: "VIDEO".into(),
+                enabled: false,
+                index: Some(5),
+            },
         ];
-        let converted = edl.into_edl().expect("tracks should convert case-insensitively");
+        let converted = edl
+            .into_edl()
+            .expect("tracks should convert case-insensitively");
         assert_eq!(converted.tracks[0].kind, TrackKind::Subtitle);
         assert!(converted.tracks[0].enabled);
         assert_eq!(converted.tracks[1].kind, TrackKind::Video);
@@ -717,13 +763,27 @@ mod tests {
                 id: 1,
                 path: "/tmp/video.mp4".into(),
                 segments: vec![
-                    ImportSegment { start: 0.0, end: 3.0 },
-                    ImportSegment { start: 7.0, end: 10.0 },
+                    ImportSegment {
+                        start: 0.0,
+                        end: 3.0,
+                    },
+                    ImportSegment {
+                        start: 7.0,
+                        end: 10.0,
+                    },
                 ],
             }],
             tracks: vec![
-                ImportTrack { kind: "video".into(), enabled: true, index: Some(0) },
-                ImportTrack { kind: "audio".into(), enabled: true, index: Some(1) },
+                ImportTrack {
+                    kind: "video".into(),
+                    enabled: true,
+                    index: Some(0),
+                },
+                ImportTrack {
+                    kind: "audio".into(),
+                    enabled: true,
+                    index: Some(1),
+                },
             ],
             export: ImportExportSettings {
                 mode: "stream-copy".into(),
@@ -745,11 +805,17 @@ mod tests {
 
         // Video track should have 2 items (one per remaining segment).
         assert_eq!(converted.tracks.len(), 2);
-        let video_items: Vec<_> = converted.tracks.iter()
+        let video_items: Vec<_> = converted
+            .tracks
+            .iter()
             .filter(|t| matches!(t.kind, TrackKind::Video))
             .flat_map(|t| t.items.iter())
             .collect();
-        assert_eq!(video_items.len(), 2, "video track should have 2 items for 2 remaining segments");
+        assert_eq!(
+            video_items.len(),
+            2,
+            "video track should have 2 items for 2 remaining segments"
+        );
 
         // Timeline items placed back-to-back: 0-3s then 3-6s (not source 7-10s on timeline).
         assert_eq!(video_items[0].timeline_start.to_seconds(), 0.0);
@@ -761,14 +827,16 @@ mod tests {
         assert_eq!(video_items[1].source_range.end.to_seconds(), 10.0);
 
         // Total exported duration = 3s + 3s = 6s = 10s original - 4s deleted.
-        let total_duration: f64 = video_items.iter()
+        let total_duration: f64 = video_items
+            .iter()
             .map(|i| i.source_range.duration_seconds())
             .sum();
-        assert!((total_duration - 6.0).abs() < 1e-6,
-            "total duration should be 6s, got {total_duration}");
+        assert!(
+            (total_duration - 6.0).abs() < 1e-6,
+            "total duration should be 6s, got {total_duration}"
+        );
 
         // validate_edl should pass (enabled items exist on video track).
         validate_edl(&converted).expect("validate_edl should pass for valid delete-ranges EDL");
     }
 }
-

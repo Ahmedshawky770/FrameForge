@@ -9,10 +9,9 @@ use frameforge_mpv_adapter::MpvPlayer;
 use std::result::Result as CoreResult;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex as AsyncMutex;
-use zbus::{Dict, OwnedObjectPath, OwnedVariant, Signature};
 use zbus::names::WellKnownName;
+use zbus::{Dict, OwnedObjectPath, OwnedVariant, Signature};
 
 /// MPRIS media player server implementing org.mpris.MediaPlayer2.
 pub struct MprisServer {
@@ -57,6 +56,7 @@ pub struct MprisServer {
 #[derive(Debug, Clone)]
 struct MprisTrack {
     id: OwnedObjectPath,
+    #[allow(dead_code)]
     metadata: MprisMetadata,
 }
 
@@ -90,7 +90,9 @@ impl PlaybackStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LoopStatus {
     None,
+    #[allow(dead_code)]
     Track,
+    #[allow(dead_code)]
     Playlist,
 }
 
@@ -137,9 +139,9 @@ impl MprisServer {
         }
 
         // Connect to the session bus
-        let connection = zbus::Connection::session()
-            .await
-            .map_err(|e| FrameForgeError::Probe(format!("Failed to connect to session bus: {e}")))?;
+        let connection = zbus::Connection::session().await.map_err(|e| {
+            FrameForgeError::Probe(format!("Failed to connect to session bus: {e}"))
+        })?;
 
         // Request the well-known name
         let name = WellKnownName::try_from("org.mpris.MediaPlayer2.frameforge")
@@ -171,7 +173,9 @@ impl MprisServer {
         };
 
         // Register the root interface
-        let root = MprisRoot { _state: state.clone() };
+        let root = MprisRoot {
+            _state: state.clone(),
+        };
         connection
             .object_server()
             .at("/org/mpris/MediaPlayer2", root)
@@ -179,20 +183,28 @@ impl MprisServer {
             .map_err(|e| FrameForgeError::Probe(format!("Failed to register root object: {e}")))?;
 
         // Register the Player interface
-        let player_iface = MprisPlayer { state: state.clone() };
+        let player_iface = MprisPlayer {
+            state: state.clone(),
+        };
         connection
             .object_server()
             .at("/org/mpris/MediaPlayer2", player_iface)
             .await
-            .map_err(|e| FrameForgeError::Probe(format!("Failed to register player object: {e}")))?;
+            .map_err(|e| {
+                FrameForgeError::Probe(format!("Failed to register player object: {e}"))
+            })?;
 
         // Register the TrackList interface
-        let tracklist = MprisTrackList { state: state.clone() };
+        let tracklist = MprisTrackList {
+            state: state.clone(),
+        };
         connection
             .object_server()
             .at("/org/mpris/MediaPlayer2", tracklist)
             .await
-            .map_err(|e| FrameForgeError::Probe(format!("Failed to register tracklist object: {e}")))?;
+            .map_err(|e| {
+                FrameForgeError::Probe(format!("Failed to register tracklist object: {e}"))
+            })?;
 
         // Store connection for cleanup
         *self.connection.lock().await = Some(connection);
@@ -248,6 +260,7 @@ pub(crate) struct MprisState {
 }
 
 /// State clone for background polling task.
+#[allow(dead_code)]
 struct MprisPollState {
     player: Arc<std::sync::Mutex<MpvPlayer>>,
     track_list: Arc<AsyncMutex<Vec<MprisTrack>>>,
@@ -279,121 +292,6 @@ impl MprisState {
     }
 }
 
-impl MprisPollState {
-    /// Lock the player mutex safely, logging and recovering from poisoning.
-    fn lock_player(player: &Arc<std::sync::Mutex<MpvPlayer>>) -> std::sync::MutexGuard<'_, MpvPlayer> {
-        player.lock().unwrap_or_else(|poisoned| {
-            eprintln!("MPRIS: player mutex poisoned — recovering");
-            poisoned.into_inner()
-        })
-    }
-
-    async fn poll_mpv_state(&self) {
-        let mut interval = tokio::time::interval(Duration::from_millis(500));
-        
-        while self.running.load(Ordering::SeqCst) {
-            interval.tick().await;
-
-            // Get mpv state
-            let (tracks, paused, time_pos, duration, speed, vol, mute) = {
-                let player = Self::lock_player(&self.player);
-                let tracks = player.get_tracks().unwrap_or_default();
-                let paused = player.paused();
-                let time_pos = player.time_position().unwrap_or(0.0);
-                let duration = player.duration().unwrap_or(0.0);
-                let speed = player.speed().unwrap_or(1.0);
-                let vol = player.volume().unwrap_or(1.0);
-                let mute = player.get_property("mute").unwrap_or(false);
-                (tracks, paused, time_pos, duration, speed, vol, mute)
-            };
-
-            // Update playback status
-            let new_status = if !paused && time_pos > 0.0 && duration > 0.0 {
-                PlaybackStatus::Playing
-            } else if paused && (time_pos > 0.0 || duration > 0.0) {
-                PlaybackStatus::Paused
-            } else {
-                PlaybackStatus::Stopped
-            };
-            *self.playback_status.lock().await = new_status;
-
-            // Update position (microseconds)
-            *self.position.lock().await = (time_pos * 1_000_000.0) as i64;
-
-            // Update rate
-            *self.rate.lock().await = speed;
-
-            // Update volume (account for mute)
-            let effective_vol = if mute { 0.0 } else { vol };
-            *self.volume.lock().await = effective_vol;
-
-            // Update track list and metadata
-            self.update_track_list_and_metadata(tracks, duration).await;
-
-            // Update capabilities
-            let has_tracks = !self.track_list.lock().await.is_empty();
-            *self.can_go_next.lock().await = has_tracks;
-            *self.can_go_previous.lock().await = has_tracks;
-            *self.can_play.lock().await = has_tracks;
-            *self.can_pause.lock().await = has_tracks;
-            *self.can_seek.lock().await = has_tracks && duration > 0.0;
-            *self.can_control.lock().await = has_tracks;
-
-            // Update loop status based on mpv's loop-playlist and loop-file
-            let loop_playlist = Self::lock_player(&self.player)
-                .get_property::<bool>("loop-playlist")
-                .unwrap_or(false);
-            let loop_file = Self::lock_player(&self.player)
-                .get_property::<bool>("loop-file")
-                .unwrap_or(false);
-            let new_loop_status = if loop_file {
-                LoopStatus::Track
-            } else if loop_playlist {
-                LoopStatus::Playlist
-            } else {
-                LoopStatus::None
-            };
-            *self.loop_status.lock().await = new_loop_status;
-        }
-    }
-
-    async fn update_track_list_and_metadata(&self, tracks: Vec<frameforge_mpv_adapter::TrackInfo>, duration: f64) {
-        // Build track list
-        let mut mpris_tracks = Vec::new();
-        let mut current_metadata = None;
-
-        for (idx, track) in tracks.iter().enumerate() {
-            let track_id = OwnedObjectPath::try_from(format!("/org/mpris/MediaPlayer2/TrackList/Track{}", idx))
-                .unwrap_or_else(|_| OwnedObjectPath::try_from("/org/mpris/MediaPlayer2/TrackList/Track0").unwrap());
-
-            let mut metadata = MprisMetadata::default();
-            
-            // Use track title if available, otherwise fallback to file name
-            metadata.title = track.title.clone();
-            metadata.track_number = Some((idx + 1) as u32);
-            metadata.duration = Some((duration * 1_000_000.0) as i64);
-
-            // For the currently playing track, use it as current metadata
-            if track.selected && current_metadata.is_none() {
-                current_metadata = Some(metadata.clone());
-            }
-
-            mpris_tracks.push(MprisTrack {
-                id: track_id,
-                metadata,
-            });
-        }
-
-        // If no track is selected but we have tracks, use the first one
-        if current_metadata.is_none() && !mpris_tracks.is_empty() {
-            current_metadata = Some(mpris_tracks[0].metadata.clone());
-        }
-
-        *self.track_list.lock().await = mpris_tracks;
-        *self.current_metadata.lock().await = current_metadata;
-    }
-}
-
 /// org.mpris.MediaPlayer2 root interface
 pub struct MprisRoot {
     _state: MprisState,
@@ -414,7 +312,12 @@ impl MprisRoot {
 
     #[zbus(property)]
     async fn supported_uri_schemes(&self) -> Vec<String> {
-        vec!["file".to_string(), "http".to_string(), "https".to_string(), "ftp".to_string()]
+        vec![
+            "file".to_string(),
+            "http".to_string(),
+            "https".to_string(),
+            "ftp".to_string(),
+        ]
     }
 
     #[zbus(property)]
@@ -462,7 +365,7 @@ impl MprisRoot {
     }
 
     async fn quit(&self) -> Result<(), zbus::fdo::Error> {
-        Err(zbus::fdo::Error::NotSupported("Quit not supported".into()).into())
+        Err(zbus::fdo::Error::NotSupported("Quit not supported".into()))
     }
 }
 
@@ -496,7 +399,7 @@ impl MprisPlayer {
         let min = *self.state.minimum_rate.lock().await;
         let max = *self.state.maximum_rate.lock().await;
         let clamped = value.clamp(min, max);
-        
+
         {
             let mut player = self.state.lock_player();
             player.set_speed(clamped);
@@ -515,19 +418,19 @@ impl MprisPlayer {
         *self.state.shuffle.lock().await = value;
         {
             let mut player = self.state.lock_player();
-            player.set_property("shuffle", value).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("Failed to set shuffle: {e}"))
-            })?;
+            player
+                .set_property("shuffle", value)
+                .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to set shuffle: {e}")))?;
         }
         Ok(())
     }
 
-#[zbus(property)]
+    #[zbus(property)]
     async fn metadata(&self) -> OwnedVariant {
         let metadata = self.state.current_metadata.lock().await;
         match metadata.as_ref() {
             Some(m) => metadata_to_owned_value(m),
-None => {
+            None => {
                 let dict = Dict::new(
                     &Signature::from_bytes(b"s").unwrap(),
                     &Signature::from_bytes(b"v").unwrap(),
@@ -602,9 +505,9 @@ None => {
     async fn next(&self) -> Result<(), zbus::fdo::Error> {
         {
             let mut player = self.state.lock_player();
-            player.command("playlist-next", &[]).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("Next failed: {e}"))
-            })?;
+            player
+                .command("playlist-next", &[])
+                .map_err(|e| zbus::fdo::Error::Failed(format!("Next failed: {e}")))?;
         }
         Ok(())
     }
@@ -612,9 +515,9 @@ None => {
     async fn previous(&self) -> Result<(), zbus::fdo::Error> {
         {
             let mut player = self.state.lock_player();
-            player.command("playlist-prev", &[]).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("Previous failed: {e}"))
-            })?;
+            player
+                .command("playlist-prev", &[])
+                .map_err(|e| zbus::fdo::Error::Failed(format!("Previous failed: {e}")))?;
         }
         Ok(())
     }
@@ -622,9 +525,9 @@ None => {
     async fn pause(&self) -> Result<(), zbus::fdo::Error> {
         {
             let mut player = self.state.lock_player();
-            player.set_property("pause", true).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("Pause failed: {e}"))
-            })?;
+            player
+                .set_property("pause", true)
+                .map_err(|e| zbus::fdo::Error::Failed(format!("Pause failed: {e}")))?;
         }
         *self.state.playback_status.lock().await = PlaybackStatus::Paused;
         Ok(())
@@ -633,9 +536,9 @@ None => {
     async fn play(&self) -> Result<(), zbus::fdo::Error> {
         {
             let mut player = self.state.lock_player();
-            player.set_property("pause", false).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("Play failed: {e}"))
-            })?;
+            player
+                .set_property("pause", false)
+                .map_err(|e| zbus::fdo::Error::Failed(format!("Play failed: {e}")))?;
         }
         *self.state.playback_status.lock().await = PlaybackStatus::Playing;
         Ok(())
@@ -644,10 +547,10 @@ None => {
     async fn play_pause(&self) -> Result<(), zbus::fdo::Error> {
         let paused: bool = {
             let mut player = self.state.lock_player();
-            let p = player.get_property("pause").unwrap_or_else(|_| true);
-            player.set_property("pause", !p).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("PlayPause failed: {e}"))
-            })?;
+            let p = player.get_property("pause").unwrap_or(true);
+            player
+                .set_property("pause", !p)
+                .map_err(|e| zbus::fdo::Error::Failed(format!("PlayPause failed: {e}")))?;
             p
         };
         *self.state.playback_status.lock().await = if paused {
@@ -661,9 +564,9 @@ None => {
     async fn stop(&self) -> Result<(), zbus::fdo::Error> {
         {
             let mut player = self.state.lock_player();
-            player.command("stop", &[]).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("Stop failed: {e}"))
-            })?;
+            player
+                .command("stop", &[])
+                .map_err(|e| zbus::fdo::Error::Failed(format!("Stop failed: {e}")))?;
         }
         *self.state.playback_status.lock().await = PlaybackStatus::Stopped;
         *self.state.position.lock().await = 0;
@@ -680,7 +583,11 @@ None => {
         Ok(())
     }
 
-    async fn set_position(&self, _track_id: OwnedObjectPath, position: i64) -> Result<(), zbus::fdo::Error> {
+    async fn set_position(
+        &self,
+        _track_id: OwnedObjectPath,
+        position: i64,
+    ) -> Result<(), zbus::fdo::Error> {
         // position is in microseconds
         let position_seconds = position as f64 / 1_000_000.0;
         {
@@ -706,9 +613,9 @@ None => {
 
         {
             let mut player = self.state.lock_player();
-            player.load(std::path::Path::new(&path)).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("OpenUri failed: {e}"))
-            })?;
+            player
+                .load(std::path::Path::new(&path))
+                .map_err(|e| zbus::fdo::Error::Failed(format!("OpenUri failed: {e}")))?;
         }
         Ok(())
     }
@@ -748,9 +655,9 @@ impl MprisTrackList {
 
         {
             let mut player = self.state.lock_player();
-            player.command("loadfile", &[&path, "append-play"]).map_err(|e| {
-                zbus::fdo::Error::Failed(format!("AddTrack failed: {e}"))
-            })?;
+            player
+                .command("loadfile", &[&path, "append-play"])
+                .map_err(|e| zbus::fdo::Error::Failed(format!("AddTrack failed: {e}")))?;
         }
 
         // Return the new track ID
@@ -758,9 +665,14 @@ impl MprisTrackList {
             let tracks = self.state.track_list.lock().await;
             tracks.len()
         };
-        let new_id = OwnedObjectPath::try_from(format!("/org/mpris/MediaPlayer2/TrackList/Track{}", track_count))
-            .unwrap_or_else(|_| OwnedObjectPath::try_from("/org/mpris/MediaPlayer2/TrackList/Track0").unwrap());
-        
+        let new_id = OwnedObjectPath::try_from(format!(
+            "/org/mpris/MediaPlayer2/TrackList/Track{}",
+            track_count
+        ))
+        .unwrap_or_else(|_| {
+            OwnedObjectPath::try_from("/org/mpris/MediaPlayer2/TrackList/Track0").unwrap()
+        });
+
         Ok(new_id)
     }
 
@@ -770,13 +682,13 @@ impl MprisTrackList {
             let tracks = self.state.track_list.lock().await;
             tracks.iter().position(|t| t.id == track_id)
         };
-        
+
         if let Some(idx) = idx {
             {
                 let mut player = self.state.lock_player();
-                player.command("playlist-remove", &[&idx.to_string()]).map_err(|e| {
-                    zbus::fdo::Error::Failed(format!("RemoveTrack failed: {e}"))
-                })?;
+                player
+                    .command("playlist-remove", &[&idx.to_string()])
+                    .map_err(|e| zbus::fdo::Error::Failed(format!("RemoveTrack failed: {e}")))?;
             }
         }
         Ok(())

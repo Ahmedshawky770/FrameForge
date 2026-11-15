@@ -1,25 +1,20 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use frameforge_tauri_app::commands::{
-    locale_theme, player, project, scrub, subtitle,
-};
+use frameforge_mpv_adapter::MpvPlayer;
+use frameforge_tauri_app::commands::{locale_theme, player, project, scrub, subtitle};
+use frameforge_tauri_app::mpris::MprisServer;
+use frameforge_tauri_app::setup;
 use frameforge_tauri_app::state::{
     ExportState, LocaleState, ScrubState, ThemeState, WaylandState, WindowXidState,
 };
-use frameforge_tauri_app::setup;
-use frameforge_tauri_app::mpris::MprisServer;
-use frameforge_mpv_adapter::MpvPlayer;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as TokioMutex;
-use tokio::time::{interval, Duration};
 
 fn main() {
-    let player = Mutex::new(
+    let player = Arc::new(Mutex::new(
         MpvPlayer::new().expect("failed to create mpv player"),
-    );
-    let mpris_player = Arc::new(Mutex::new(
-        MpvPlayer::new().expect("failed to create mpv player for MPRIS"),
     ));
+    let mpris_player = player.clone();
 
     // Export progress / cancellation state shared between project_export and
     // the cancel/progress poll commands.
@@ -27,7 +22,7 @@ fn main() {
 
     // Create MPRIS server before Tauri builder so we can start it after setup
     let mpris_server = Arc::new(TokioMutex::new(
-        MprisServer::new(mpris_player.clone()).unwrap()
+        MprisServer::new(mpris_player.clone()).unwrap(),
     ));
 
     tauri::Builder::default()
@@ -59,7 +54,6 @@ fn main() {
             player::player_set_speed,
             player::player_set_volume,
             player::player_set_muted,
-            player::player_step_frame,
             player::player_toggle_fullscreen,
             player::player_state,
             // diagnostics
@@ -68,8 +62,6 @@ fn main() {
             player::player_get_hwdec,
             player::player_set_vo,
             player::player_get_vo,
-            player::player_get_volume,
-            player::player_get_speed,
             player::player_is_wayland,
             // mpv child window resize (X11)
             player::player_resize_child_window,
@@ -96,26 +88,7 @@ fn main() {
             project::project_delete_ranges,
             project::media_probe_duration,
         ])
-        .setup(|app| {
-            tauri::async_runtime::block_on(async move {
-                setup::setup(app).await
-            })
-        })
+        .setup(|app| tauri::async_runtime::block_on(async move { setup::setup(app).await }))
         .run(tauri::generate_context!())
         .expect("error while running tauris application");
-
-    // Spawn MPRIS polling task that shares Arc<MpvPlayer> directly.
-    // This task runs concurrently with the Tauri event loop and reads player state
-    // (position, duration, pause, speed, volume) without requiring the D-Bus connection.
-    let _mpris_poll_player = Arc::clone(&mpris_player);
-    tokio::spawn(async move {
-        let mut interval = interval(Duration::from_millis(500));
-        loop {
-            interval.tick().await;
-            // Poll player state via the shared MpvPlayer.
-            // The player provides: time_position(), duration(), paused(), speed(), volume().
-            // Update MPRIS playback_status, loop_status, rate, volume, position, metadata.
-            // This task does not require the D-Bus connection — it only reads the player state.
-        }
-    });
 }

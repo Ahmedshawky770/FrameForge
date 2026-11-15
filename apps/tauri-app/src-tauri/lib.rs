@@ -1,8 +1,8 @@
-pub mod state;
 pub mod commands;
-pub mod setup;
 pub mod mpris;
+pub mod setup;
+pub mod state;
 
-pub use state::*;
-pub use setup::*;
 pub use mpris::*;
+pub use setup::*;
+pub use state::*;

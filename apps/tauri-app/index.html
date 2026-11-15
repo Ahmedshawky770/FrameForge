@@ -1350,9 +1350,9 @@
         <h4 data-i18n="label.deleteRanges">Delete Ranges</h4>
         <div class="delete-range-inputs">
           <label>From:</label>
-          <input id="del-from" type="text" placeholder="00:00:00" />
+          <input id="del-from" type="text" placeholder="00:00:00.000" />
           <label>To:</label>
-          <input id="del-to" type="text" placeholder="00:00:00" />
+          <input id="del-to" type="text" placeholder="00:00:00.000" />
           <button id="btn-add-delete-range" data-i18n="btn.addDeleteRange">Add</button>
         </div>
         <ul id="delete-ranges-list" role="list"></ul>
@@ -1471,6 +1471,16 @@
         'msg.merge-empty': 'Add at least 2 videos to merge',
         'msg.merge-exported': 'Merge export started',
         'msg.no-video': 'Load a video first to delete ranges',
+        'msg.export-failed': 'Export failed: {error}',
+        'msg.save-failed': 'Save failed: {error}',
+        'msg.merge-failed': 'Merge export failed: {error}',
+        'msg.clip-split': 'Clip split into 2 parts',
+        'msg.duration-failed': 'Could not get duration for: {name}',
+        'msg.scrub-prev-failed': 'Scrub prev failed: {error}',
+        'msg.scrub-next-failed': 'Scrub next failed: {error}',
+        'msg.mute-failed': 'Mute failed: {error}',
+        'msg.cancel-failed': 'Cancel failed: {error}',
+        'msg.diagnostics-failed': 'Diagnostics failed: {error}',
         'locale.en': 'English',
         'locale.ar': 'العربية',
         'label.time': 'Time',
@@ -1532,6 +1542,16 @@
         'msg.merge-empty': 'أضف فيديوهين على الأقل للدمج',
         'msg.merge-exported': 'بدأ تصدير الدمج',
         'msg.no-video': 'حمّل فيديو أولاً لحذف فترات',
+        'msg.export-failed': 'فشل التصدير: {error}',
+        'msg.save-failed': 'فشل الحفظ: {error}',
+        'msg.merge-failed': 'فشل تصدير الدمج: {error}',
+        'msg.clip-split': 'تم تقسيم المقطع إلى جزأين',
+        'msg.duration-failed': 'تعذر الحصول على المدة: {name}',
+        'msg.scrub-prev-failed': 'فشل الانتقال للإطار السابق: {error}',
+        'msg.scrub-next-failed': 'فشل الانتقال للإطار التالي: {error}',
+        'msg.mute-failed': 'فشل كتم الصوت: {error}',
+        'msg.cancel-failed': 'فشل الإلغاء: {error}',
+        'msg.diagnostics-failed': 'فشل التشخيص: {error}',
         'locale.en': 'English',
         'locale.ar': 'العربية',
         'label.time': 'الوقت',
@@ -1566,7 +1586,8 @@
     let projectClips = [];
 
     function t(key, params = {}) {
-      let str = STRINGS[currentLocale][key] || STRINGS.en[key] || key;
+      const locale = (typeof currentLocale === 'string' && STRINGS[currentLocale]) ? currentLocale : 'en';
+      let str = (STRINGS[locale] && STRINGS[locale][key]) || (STRINGS.en && STRINGS.en[key]) || key;
       Object.entries(params).forEach(([k, v]) => {
         str = str.replace(new RegExp(`\\{${k}\\}`, 'g'), v);
       });
@@ -1655,10 +1676,10 @@
 
     function fmtTime(s) {
       if (!isFinite(s) || s < 0) s = 0;
-      const totalSeconds = Math.round(s * 10) / 10;
+      const totalSeconds = Math.round(s * 1000) / 1000;
       const m = Math.floor(totalSeconds / 60);
       const sec = totalSeconds % 60;
-      return `${m}:${sec.toFixed(1).padStart(3, '0')}`;
+      return `${m}:${sec.toFixed(3).padStart(6, '0')}`;
     }
 
     function updateTimeline() {
@@ -1678,7 +1699,10 @@
     let duration = 0;
     let currentFile = null;
     let currentDisplayTime = 0;
-    let seekUpdating = false;
+    let seekTargetTime = null;
+    let seekTargetUntil = 0;
+    let seekChain = Promise.resolve();
+    const isSeekProtected = () => Date.now() < seekTargetUntil;
     let isScrubbing = false;
     let scrubRequestId = 0;
 
@@ -1690,12 +1714,12 @@
       try {
         const st = await invoke('player_state');
         duration = st.duration;
-        currentDisplayTime = st.current_time;
+        if (!isSeekProtected()) currentDisplayTime = st.current_time;
         isPlaying = !st.paused;
         const elsPlay = document.getElementById('btn-play-pause');
         if (elsPlay) elsPlay.textContent = isPlaying ? t('btn.play') : t('btn.play');
         const elsTime = document.getElementById('time-display');
-        if (elsTime) elsTime.textContent = `${fmtTime(st.current_time)} / ${fmtTime(duration)}`;
+        if (!isSeekProtected() && elsTime) elsTime.textContent = `${fmtTime(st.current_time)} / ${fmtTime(duration)}`;
         // Video-surface hover progress bar
         const elsVideoTime = document.getElementById('video-current-time');
         const elsDuration = document.getElementById('video-duration');
@@ -1704,11 +1728,13 @@
         const pct = duration > 0 ? (st.current_time / duration) * 100 : 0;
         if (elsVideoTime) elsVideoTime.textContent = fmtTime(st.current_time);
         if (elsDuration) elsDuration.textContent = fmtTime(duration);
-        if (elsProgressFill) elsProgressFill.style.width = pct + '%';
-        if (elsProgressThumb) elsProgressThumb.style.left = pct + '%';
-        updateTimeline();
+        if (!isSeekProtected()) {
+          if (elsProgressFill) elsProgressFill.style.width = pct + '%';
+          if (elsProgressThumb) elsProgressThumb.style.left = pct + '%';
+          updateTimeline();
+        }
         const elsSeek = document.getElementById('seek-bar');
-        if (!seekUpdating && duration > 0 && elsSeek) {
+        if (!isSeekProtected() && duration > 0 && elsSeek) {
           elsSeek.value = (st.current_time / duration) * 100;
         }
         if (elsSeek) elsSeek.max = 100;
@@ -1878,22 +1904,10 @@
       applyLanguage();
     }
 
-    // Event delegation for clip removal
-    document.getElementById('clip-list').addEventListener('click', (e) => {
-      const btn = e.target.closest('.clip-btn');
-      if (!btn) return;
-      const idx = parseInt(btn.getAttribute('data-clip-index'), 10);
-      if (isNaN(idx)) return;
-      if (btn.classList.contains('btn-split')) {
-        selectClip(idx);
-        splitClip(idx);
-      } else {
-        removeClip(idx);
-      }
-    });
-
     function removeClip(idx) {
       projectClips.splice(idx, 1);
+      if (selectedClipIndex === idx) selectedClipIndex = null;
+      else if (selectedClipIndex !== null && selectedClipIndex > idx) selectedClipIndex--;
       renderClipList();
       updateCompatibility();
     }
@@ -1969,6 +1983,12 @@
         // Reorder the array
         const [movedClip] = projectClips.splice(draggedClipIndex, 1);
         projectClips.splice(targetIndex, 0, movedClip);
+
+        if (selectedClipIndex === draggedClipIndex) selectedClipIndex = targetIndex;
+        else if (selectedClipIndex !== null) {
+          if (selectedClipIndex > draggedClipIndex && selectedClipIndex <= targetIndex) selectedClipIndex--;
+          else if (selectedClipIndex < draggedClipIndex && selectedClipIndex >= targetIndex) selectedClipIndex++;
+        }
 
         renderClipList();
         updateCompatibility();
@@ -2058,6 +2078,7 @@
     let selectedClipIndex = null;
 
     function selectClip(idx) {
+      if (idx < 0 || idx >= projectClips.length) return;
       selectedClipIndex = idx;
       // Update UI selection
       document.querySelectorAll('.clip-item').forEach((item, i) => {
@@ -2107,16 +2128,25 @@
 
       renderClipList();
       updateCompatibility();
-      toast('Clip split into 2 parts');
+      toast(t('msg.clip-split'));
     }
 
-    // Split button event delegation
+    // Event delegation for clip list (split / remove / select)
     document.getElementById('clip-list').addEventListener('click', (e) => {
+      const removeBtn = e.target.closest('.btn-remove');
+      if (removeBtn) {
+        const idx = parseInt(removeBtn.dataset.clipIndex, 10);
+        if (!isNaN(idx)) removeClip(idx);
+        return;
+      }
+
       const splitBtn = e.target.closest('.btn-split');
       if (splitBtn) {
         const idx = parseInt(splitBtn.dataset.clipIndex, 10);
-        selectClip(idx);
-        splitClip(idx);
+        if (!isNaN(idx)) {
+          selectClip(idx);
+          splitClip(idx);
+        }
         return;
       }
 
@@ -2124,7 +2154,7 @@
       const clipItem = e.target.closest('.clip-item');
       if (clipItem && !e.target.closest('button') && !e.target.closest('input')) {
         const idx = parseInt(clipItem.dataset.clipIndex, 10);
-        selectClip(idx);
+        if (!isNaN(idx)) selectClip(idx);
       }
     });
 
@@ -2179,7 +2209,7 @@
         await invoke('project_save', { edlJson: edlJson, path });
         toast(t('msg.save-complete'));
       } catch (e) {
-        toast('Save failed: ' + e);
+        toast(t('msg.save-failed', { error: e }));
       } finally {
         setButtonLoading(btn, false);
       }
@@ -2203,7 +2233,7 @@
         await updateCompatibility();
         toast(t('msg.load-complete'));
       } catch (e) {
-        toast('Load failed: ' + e);
+        toast(t('msg.load-failed', { error: e }));
       } finally {
         setButtonLoading(btn, false);
       }
@@ -2247,14 +2277,9 @@
         }
         if (p >= 1.0) {
           stopExportPoll();
-          setExportBusy(false);
-          const name = document.getElementById('export-dest')?.value || '';
-          toast(t('msg.export-complete', { name }));
         }
       } catch (e) {
-        stopExportPoll();
-        setExportBusy(false);
-        toast('Export failed: ' + e);
+        // Progress polling failure is non-fatal; runExport owns error reporting.
       }
     }
 
@@ -2263,8 +2288,9 @@
      * Shows a live progress bar while the backend command runs.
      */
     async function runExport(dest) {
-      const encoder = document.getElementById('export-encoder')?.value || 'x264';
-      const preset = document.getElementById('export-preset')?.value || 'fast';
+      if (exportInProgress) return;
+      const encoder = document.getElementById('export-encoder').value || 'x264';
+      const preset = document.getElementById('export-preset').value || 'fast';
 
       setExportBusy(true);
       startExportPoll();
@@ -2282,7 +2308,7 @@
             { kind: 'audio', enabled: true, index: 1 },
           ],
           export: {
-            mode: 'stream-copy',
+            mode: (encoder === 'copy' ? 'stream-copy' : 'reencode'),
             preset: preset,
             container: 'mp4',
             destination: dest,
@@ -2304,11 +2330,11 @@
           prog.value = 100;
           prog.setAttribute('aria-valuenow', 100);
         }
-        const name = document.getElementById('export-dest')?.value || dest;
+        const name = document.getElementById('export-dest').value || dest;
         toast(t('msg.export-complete', { name }));
       } catch (e) {
         stopExportPoll();
-        toast('Export failed: ' + e);
+        toast(t('msg.export-failed', { error: e }));
       } finally {
         setExportBusy(false);
       }
@@ -2455,7 +2481,7 @@ const elsPlaceholder = document.getElementById('placeholder');
         try {
           await invoke('player_scrub_prev_frame');
           await refreshState();
-        } catch (e) { toast('Scrub prev failed: ' + e); }
+        } catch (e) { toast(t('msg.scrub-prev-failed', { error: e })); }
       });
 
       // Scrub next frame (precision frame-accurate)
@@ -2465,7 +2491,7 @@ const elsPlaceholder = document.getElementById('placeholder');
         try {
           await invoke('player_scrub_next_frame');
           await refreshState();
-        } catch (e) { toast('Scrub next failed: ' + e); }
+        } catch (e) { toast(t('msg.scrub-next-failed', { error: e })); }
       });
 
       // Speed
@@ -2489,15 +2515,18 @@ const elsPlaceholder = document.getElementById('placeholder');
           await invoke('player_set_muted', { muted: isMuted });
           elsMute.textContent = isMuted ? '🔊' : '🔇';
           elsMute.setAttribute('aria-label', isMuted ? 'Unmute' : 'Mute');
-        } catch (e) { toast('Mute failed: ' + e); }
+        } catch (e) { toast(t('msg.mute-failed', { error: e })); }
       });
 
       // Seek bar
       const elsSeek = document.getElementById('seek-bar');
       elsSeek.addEventListener('change', async (e) => {
-        seekUpdating = false;
+        
         const t = (parseFloat(e.target.value) / 100) * duration;
-        await invoke('player_seek', { seconds: t });
+        currentDisplayTime = t;
+        const elsTime = document.getElementById('time-display'); if (elsTime) elsTime.textContent = `${fmtTime(t)} / ${fmtTime(duration)}`;
+        seekTargetTime = t; seekTargetUntil = Date.now() + 300;
+        await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: t })).catch(() => {}));
         await refreshState();
         hideScrubPreview();
       });
@@ -2516,8 +2545,10 @@ const elsPlaceholder = document.getElementById('placeholder');
         }
         pct = Math.max(0, Math.min(1, pct));
         const t = pct * duration;
-        seekUpdating = false;
-        await invoke('player_seek', { seconds: t });
+        currentDisplayTime = t;
+        const elsTime = document.getElementById('time-display'); if (elsTime) elsTime.textContent = `${fmtTime(t)} / ${fmtTime(duration)}`;
+        seekTargetTime = t; seekTargetUntil = Date.now() + 300;
+        await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: t })).catch(() => {}));
         await refreshState();
         hideScrubPreview();
       });
@@ -2551,7 +2582,7 @@ const elsPlaceholder = document.getElementById('placeholder');
         if (!duration) return;
         dragActive = true;
         isScrubbing = true;
-        seekUpdating = true;
+        seekTargetTime = t; seekTargetUntil = Date.now() + 300;
         const rect = elsTimelineBar.getBoundingClientRect();
         const dir = document.documentElement.dir;
         if (dir === 'rtl') {
@@ -2590,11 +2621,16 @@ const elsPlaceholder = document.getElementById('placeholder');
         if (!dragActive) return;
         dragActive = false;
         isScrubbing = false;
-        seekUpdating = false;
+        
         const finalPct = parseFloat(elsSeek.value) / 100;
         const t = finalPct * duration;
-        await invoke('player_seek', { seconds: t });
+        currentDisplayTime = t;
+        const elsTime = document.getElementById('time-display');
+        if (elsTime) elsTime.textContent = `${fmtTime(t)} / ${fmtTime(duration)}`;
+        seekTargetTime = t; seekTargetUntil = Date.now() + 300;
+        await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: t })).catch(() => {}));
         await refreshState();
+        
         hideScrubPreview();
       };
 
@@ -2603,6 +2639,7 @@ const elsPlaceholder = document.getElementById('placeholder');
         startDrag(e.clientX);
         doDrag(e.clientX);
       });
+      let mouseHideTimer;
       window.addEventListener('mousemove', (e) => {
         if (dragActive) doDrag(e.clientX);
         clearTimeout(mouseHideTimer);
@@ -2626,8 +2663,8 @@ const elsPlaceholder = document.getElementById('placeholder');
 
       // Export buttons
       document.getElementById('btn-export').addEventListener('click', doExport);
-      document.getElementById('btn-save-project').addEventListener('click', saveProject);
-      document.getElementById('btn-load-project').addEventListener('click', loadProject);
+      document.getElementById('btn-save-project')?.addEventListener('click', saveProject);
+      document.getElementById('btn-load-project')?.addEventListener('click', loadProject);
 
       // Abort an in-flight export.
       const elsExportCancel = document.getElementById('export-cancel-btn');
@@ -2639,14 +2676,13 @@ const elsPlaceholder = document.getElementById('placeholder');
             setExportBusy(false);
             toast('Export cancelled');
           } catch (e) {
-            toast('Cancel failed: ' + e);
+            toast(t('msg.cancel-failed', { error: e }));
           }
         });
       }
 
       // Fullscreen
       const elsFullscreen = document.getElementById('btn-fullscreen');
-      let mouseHideTimer;
       const hideCursor = () => {
         const app = document.getElementById('app');
         if (app.classList.contains('is-fullscreen')) {
@@ -2658,15 +2694,16 @@ const elsPlaceholder = document.getElementById('placeholder');
       };
       
       elsFullscreen.addEventListener('click', async () => {
-        await invoke('player_toggle_fullscreen');
-        const isFs = document.getElementById('app').classList.toggle('is-fullscreen');
+        const isFs = await invoke('player_toggle_fullscreen');
+        const app = document.getElementById('app');
+        if (isFs) app.classList.add('is-fullscreen'); else app.classList.remove('is-fullscreen');
         if (isFs) {
           document.getElementById('video-surface').addEventListener('mousemove', showCursor);
-          document.getElementById('video-surface').addEventListener('mouseleave', hideCursor);
+          document.getElementById('video-surface')?.addEventListener('mouseleave', hideCursor);
           mouseHideTimer = setTimeout(hideCursor, 3000);
         } else {
           document.getElementById('video-surface').removeEventListener('mousemove', showCursor);
-          document.getElementById('video-surface').removeEventListener('mouseleave', hideCursor);
+          document.getElementById('video-surface')?.removeEventListener('mouseleave', hideCursor);
           clearTimeout(mouseHideTimer);
           showCursor();
         }
@@ -2684,16 +2721,16 @@ const elsPlaceholder = document.getElementById('placeholder');
         const now = Date.now();
         if (now - lastClickTime < 300) {
           // Double click detected - toggle fullscreen
-          await invoke('player_toggle_fullscreen');
+          const isFs = await invoke('player_toggle_fullscreen');
           const app = document.getElementById('app');
-          app.classList.toggle('is-fullscreen');
+          if (isFs) app.classList.add('is-fullscreen'); else app.classList.remove('is-fullscreen');
           if (app.classList.contains('is-fullscreen')) {
             document.getElementById('video-surface').addEventListener('mousemove', showCursor);
-            document.getElementById('video-surface').addEventListener('mouseleave', hideCursor);
+            document.getElementById('video-surface')?.addEventListener('mouseleave', hideCursor);
             mouseHideTimer = setTimeout(hideCursor, 3000);
           } else {
             document.getElementById('video-surface').removeEventListener('mousemove', showCursor);
-            document.getElementById('video-surface').removeEventListener('mouseleave', hideCursor);
+            document.getElementById('video-surface')?.removeEventListener('mouseleave', hideCursor);
             clearTimeout(mouseHideTimer);
             showCursor();
           }
@@ -2741,8 +2778,8 @@ const elsPlaceholder = document.getElementById('placeholder');
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         switch (e.key.toLowerCase()) {
           case ' ': e.preventDefault(); await invoke('player_play_pause'); await refreshState(); break;
-          case 'arrowleft': e.preventDefault(); await invoke('player_seek', { seconds: Math.max(0, currentDisplayTime - 1) }); await refreshState(); break;
-          case 'arrowright': e.preventDefault(); await invoke('player_seek', { seconds: Math.min(duration, currentDisplayTime + 1) }); await refreshState(); break;
+          case 'arrowleft': e.preventDefault(); { const t = Math.max(0, currentDisplayTime - 1); currentDisplayTime = t; const elsTime = document.getElementById('time-display'); if (elsTime) elsTime.textContent = `${fmtTime(t)} / ${fmtTime(duration)}`; seekTargetTime = t; seekTargetUntil = Date.now() + 300; await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: t })).catch(() => {})); await refreshState();  } break;
+          case 'arrowright': e.preventDefault(); { const t = Math.min(duration, currentDisplayTime + 1); currentDisplayTime = t; const elsTime = document.getElementById('time-display'); if (elsTime) elsTime.textContent = `${fmtTime(t)} / ${fmtTime(duration)}`; seekTargetTime = t; seekTargetUntil = Date.now() + 300; await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: t })).catch(() => {})); await refreshState();  } break;
           case 'arrowup': e.preventDefault();
             await invoke('player_set_volume', { volume: Math.min(1, (parseFloat(elsVolume.value) || 0) + 0.05) });
             const newVolUp = Math.min(1, (parseFloat(elsVolume.value) || 0) + 0.05);
@@ -2753,33 +2790,32 @@ const elsPlaceholder = document.getElementById('placeholder');
             const newVolDown = Math.max(0, (parseFloat(elsVolume.value) || 0) - 0.05);
             if (elsVolume) elsVolume.value = newVolDown;
             break;
-          case 'j': e.preventDefault(); await invoke('player_seek', { seconds: Math.max(0, currentDisplayTime - 10) }); await refreshState(); break;
+          case 'j': e.preventDefault(); { const t = Math.max(0, currentDisplayTime - 10); currentDisplayTime = t; const elsTime = document.getElementById('time-display'); if (elsTime) elsTime.textContent = `${fmtTime(t)} / ${fmtTime(duration)}`; seekTargetTime = t; seekTargetUntil = Date.now() + 300; await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: t })).catch(() => {})); await refreshState();  } break;
           case 'k': e.preventDefault(); await invoke('player_play_pause'); await refreshState(); break;
-          case 'l': e.preventDefault(); await invoke('player_seek', { seconds: Math.min(duration, currentDisplayTime + 10) }); await refreshState(); break;
+          case 'l': e.preventDefault(); { const t = Math.min(duration, currentDisplayTime + 10); currentDisplayTime = t; const elsTime = document.getElementById('time-display'); if (elsTime) elsTime.textContent = `${fmtTime(t)} / ${fmtTime(duration)}`; seekTargetTime = t; seekTargetUntil = Date.now() + 300; await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: t })).catch(() => {})); await refreshState();  } break;
           case 'o': e.preventDefault(); elsOpen.click(); break;
           case 'f': e.preventDefault();
-            await invoke('player_toggle_fullscreen');
-            const app = document.getElementById('app');
-            app.classList.toggle('is-fullscreen');
-            if (app.classList.contains('is-fullscreen')) {
+            {
+              const isFs = await invoke('player_toggle_fullscreen');
+              const app = document.getElementById('app');
+              if (isFs) app.classList.add('is-fullscreen'); else app.classList.remove('is-fullscreen');
+              if (app.classList.contains('is-fullscreen')) {
               document.getElementById('video-surface').addEventListener('mousemove', showCursor);
-              document.getElementById('video-surface').addEventListener('mouseleave', hideCursor);
+              document.getElementById('video-surface')?.addEventListener('mouseleave', hideCursor);
               mouseHideTimer = setTimeout(hideCursor, 3000);
             } else {
               document.getElementById('video-surface').removeEventListener('mousemove', showCursor);
-              document.getElementById('video-surface').removeEventListener('mouseleave', hideCursor);
+              document.getElementById('video-surface')?.removeEventListener('mouseleave', hideCursor);
               clearTimeout(mouseHideTimer);
               showCursor();
+            }
             }
             break;
           case 'escape': e.preventDefault();
             {
-              const app = document.getElementById('app');
-              if (app.classList.contains('is-fullscreen')) {
-                await invoke('player_toggle_fullscreen');
-                app.classList.remove('is-fullscreen');
-              }
               await invoke('player_set_fullscreen', { fullscreen: false });
+              const app = document.getElementById('app');
+              app.classList.remove('is-fullscreen');
             }
             break;
         }
@@ -2799,19 +2835,33 @@ const elsPlaceholder = document.getElementById('placeholder');
       // Re-apply child window geometry when entering/leaving fullscreen
       // (#video-surface bounds change when timeline/project panel are hidden).
       const appEl = document.getElementById('app');
+      let appObserver = null;
       if (appEl) {
-        new MutationObserver(scheduleSync).observe(appEl, { attributes: true, attributeFilter: ['class'] });
+        appObserver = new MutationObserver(scheduleSync);
+        appObserver.observe(appEl, { attributes: true, attributeFilter: ['class'] });
       }
 
       // fullscreenchange event (mpv or browser fullscreen toggle).
-      document.addEventListener('fullscreenchange', scheduleSync);
+      document.addEventListener('fullscreenchange', () => {
+        const app = document.getElementById('app');
+        if (document.fullscreenElement) app.classList.add('is-fullscreen');
+        else app.classList.remove('is-fullscreen');
+        scheduleSync();
+      });
 
       // ResizeObserver catches #video-surface size changes even when the window
       // itself is not resized (e.g. sidebar collapse, RTL layout switch).
       const surfaceEl = document.getElementById('video-surface');
+      let surfaceObserver = null;
       if (surfaceEl) {
-        new ResizeObserver(scheduleSync).observe(surfaceEl);
+        surfaceObserver = new ResizeObserver(scheduleSync);
+        surfaceObserver.observe(surfaceEl);
       }
+
+      window.addEventListener('beforeunload', () => {
+        if (appObserver) appObserver.disconnect();
+        if (surfaceObserver) surfaceObserver.disconnect();
+      });
 
       // Locale dropdown still needs its own debounced handler.
       if (elsLocaleDropdown && elsLocaleBtn) {
@@ -2919,7 +2969,7 @@ const elsPlaceholder = document.getElementById('placeholder');
 
         alert(lines.join('\n'));
       } catch (e) {
-        alert('Diagnostics failed: ' + e);
+        alert(t('msg.diagnostics-failed', { error: e }));
       }
     }
 
@@ -2936,8 +2986,10 @@ const elsPlaceholder = document.getElementById('placeholder');
     function formatSeconds(sec) {
       const h = Math.floor(sec / 3600);
       const m = Math.floor((sec % 3600) / 60);
-      const s = Math.floor(sec % 60);
-      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      const s = sec % 60;
+      const whole = Math.floor(s);
+      const ms = Math.round((s - whole) * 1000);
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(whole).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
     }
 
     function parseSeconds(str) {
@@ -2994,14 +3046,18 @@ const edlJson = await invoke('project_delete_ranges', {
           duration: duration || 0,
           deleteRanges: ranges,
         });
+          setExportBusy(true);
+          startExportPoll();
           await invoke('project_export', {
             edlJson: edlJson,
             outputPath: path,
             encoderPref: 'x264',
             qualityPreset: 'fast',
           });
+          stopExportPoll();
           toast(t('msg.merge-exported'));
-        } catch (e) { toast('Export failed: ' + e); }
+        } catch (e) { toast(t('msg.export-failed', { error: e })); }
+        finally { setExportBusy(false); }
       });
     }
 
@@ -3060,7 +3116,7 @@ const edlJson = await invoke('project_delete_ranges', {
         if (duration > 0) {
           mergeClips.push({ path, name, duration });
         } else {
-          toast('Could not get duration for: ' + name);
+          toast(t('msg.duration-failed', { name }));
         }
       }
       renderMergeList();
@@ -3086,18 +3142,22 @@ const edlJson = await invoke('project_delete_ranges', {
         export: { mode: 'stream-copy', preset: 'fast', container: 'mp4', destination: path },
       };
       try {
+        setExportBusy(true);
+        startExportPoll();
         await invoke('project_export', {
           edlJson: JSON.stringify(edl),
           outputPath: path,
           encoderPref: 'x264',
           qualityPreset: 'fast',
         });
+        stopExportPoll();
         toast(t('msg.merge-exported'));
         mergePage.style.display = 'none';
         const app = document.getElementById('app');
         app.style.removeProperty('display');
         scheduleSync();
-      } catch (e) { toast('Merge export failed: ' + e); }
+      } catch (e) { toast(t('msg.merge-failed', { error: e })); }
+      finally { setExportBusy(false); }
     });
 
     init();

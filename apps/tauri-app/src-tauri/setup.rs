@@ -1,5 +1,6 @@
-use crate::state::{WaylandState, WindowXidState};
+#![allow(deprecated)]
 use crate::mpris::MprisServer;
+use crate::state::{WaylandState, WindowXidState};
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{LogicalSize, Manager, WebviewWindow};
@@ -30,18 +31,23 @@ pub fn extract_xid(window: &WebviewWindow) -> Option<u64> {
         let xid = match raw_handle {
             RawWindowHandle::Xlib(xlib_handle) => {
                 // Xlib handle contains the window ID directly
-                xlib_handle.window as u64
+                xlib_handle.window
             }
             RawWindowHandle::Xcb(xcb_handle) => {
                 // XCB handle contains the window ID directly
                 xcb_handle.window.get() as u64
             }
             RawWindowHandle::Wayland(_) => {
-                println!("Wayland handle detected but WAYLAND_DISPLAY not set - treating as Wayland");
+                println!(
+                    "Wayland handle detected but WAYLAND_DISPLAY not set - treating as Wayland"
+                );
                 0
             }
             _ => {
-                println!("Unsupported raw window handle type for XID extraction: {:?}", raw_handle);
+                println!(
+                    "Unsupported raw window handle type for XID extraction: {:?}",
+                    raw_handle
+                );
                 0
             }
         };
@@ -53,8 +59,6 @@ pub fn extract_xid(window: &WebviewWindow) -> Option<u64> {
     None
 }
 
-/// X11 helpers for creating a dedicated child window that mpv renders into,
-/// so video is confined to #video-surface instead of covering the whole WebView.
 #[cfg(target_os = "linux")]
 #[link(name = "X11")]
 extern "C" {
@@ -73,7 +77,14 @@ extern "C" {
     fn XFlush(display: *mut c_void) -> c_int;
     fn XOpenDisplay(display_name: *const c_char) -> *mut c_void;
     fn XRaiseWindow(display: *mut c_void, w: c_ulong) -> c_int;
-    fn XMoveResizeWindow(display: *mut c_void, w: c_ulong, x: c_int, y: c_int, width: c_uint, height: c_uint) -> c_int;
+    fn XMoveResizeWindow(
+        display: *mut c_void,
+        w: c_ulong,
+        x: c_int,
+        y: c_int,
+        width: c_uint,
+        height: c_uint,
+    ) -> c_int;
 }
 
 /// Cached X11 display connection — opened once and reused across all X11 calls.
@@ -81,6 +92,8 @@ static X_DISPLAY: OnceLock<usize> = OnceLock::new();
 
 /// Get (or lazily open) the shared X11 display connection.
 #[cfg(target_os = "linux")]
+/// # Safety
+/// Calls X11 FFI; caller must ensure display pointer is valid.
 pub unsafe fn shared_display() -> Option<*mut c_void> {
     let ptr = *X_DISPLAY.get_or_init(|| XOpenDisplay(std::ptr::null()) as usize);
     if ptr == 0 {
@@ -92,6 +105,8 @@ pub unsafe fn shared_display() -> Option<*mut c_void> {
 
 /// Create a borderless X11 child window inside `parent` and map it.
 #[cfg(target_os = "linux")]
+/// # Safety
+/// Calls X11 FFI; caller must ensure display/parent are valid.
 pub unsafe fn create_child_window(
     display: *mut c_void,
     parent: c_ulong,
@@ -120,6 +135,8 @@ pub unsafe fn create_child_window(
 /// Move/resize an existing mpv child X11 window.
 /// XMapWindow and XRaiseWindow are done once at creation (create_child_window).
 #[cfg(target_os = "linux")]
+/// # Safety
+/// Calls X11 FFI; caller must ensure display/win are valid.
 pub unsafe fn resize_child_window(
     display: *mut c_void,
     win: c_ulong,
@@ -138,9 +155,12 @@ pub unsafe fn resize_child_window(
 
 /// Setup function called during Tauri app initialization
 pub async fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "main window not found")))?;
+    let window = app.get_webview_window("main").ok_or_else(|| {
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "main window not found",
+        ))
+    })?;
     app.manage(window.clone());
 
     // Detect Wayland session
@@ -155,7 +175,7 @@ pub async fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     {
         let mut state = wayland_state
             .lock()
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+            .map_err(|e| Box::new(std::io::Error::other(e.to_string())))?;
         state.set_wayland(is_wayland);
     }
 
@@ -165,7 +185,7 @@ pub async fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         if !is_wayland {
             if let Some(xid) = extract_xid(&window) {
                 let xid_state = app.state::<Mutex<WindowXidState>>();
-                let mut guard = xid_state.lock().unwrap();
+                let mut guard = xid_state.lock().unwrap_or_else(|e| e.into_inner());
                 guard.set_xid(xid);
                 println!("Set mpv wid (XID): {}", xid);
 
@@ -178,7 +198,7 @@ pub async fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(child) =
                         unsafe { create_child_window(display, xid as c_ulong, 0, 0, 1280, 720) }
                     {
-                        guard.set_child_xid(child as u64);
+                        guard.set_child_xid(child);
                         println!("Created mpv child window (XID): {}", child);
                     }
                 }
@@ -188,11 +208,18 @@ pub async fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Ensure window is not fullscreen and has reasonable constraints
     let _ = window.set_fullscreen(false);
-    let _ = window.set_min_size(Some(LogicalSize { width: 800.0, height: 600.0 }));
-    let _ = window.set_max_size(Some(LogicalSize { width: 3840.0, height: 2160.0 }));
+    let _ = window.set_min_size(Some(LogicalSize {
+        width: 800.0,
+        height: 600.0,
+    }));
+    let _ = window.set_max_size(Some(LogicalSize {
+        width: 3840.0,
+        height: 2160.0,
+    }));
 
     // Start MPRIS D-Bus service
-    let mpris_server: Arc<TokioMutex<MprisServer>> = app.state::<Arc<TokioMutex<MprisServer>>>().inner().clone();
+    let mpris_server: Arc<TokioMutex<MprisServer>> =
+        app.state::<Arc<TokioMutex<MprisServer>>>().inner().clone();
     tauri::async_runtime::spawn(async move {
         let mut mpris_guard = mpris_server.lock().await;
         let start_result = mpris_guard.start().await;

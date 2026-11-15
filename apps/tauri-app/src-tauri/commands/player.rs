@@ -1,5 +1,5 @@
-use crate::state::{WaylandState, WindowXidState};
 use crate::setup;
+use crate::state::{WaylandState, WindowXidState};
 use frameforge_mpv_adapter::MpvPlayer;
 use frameforge_tauri_plugin_player::PlayerState;
 use std::sync::Mutex;
@@ -8,18 +8,21 @@ use tauri::{command, State, WebviewWindow};
 use tokio::time::sleep;
 
 #[cfg(target_os = "linux")]
-use std::os::raw::{c_int, c_uint, c_ulong, c_void};
+use std::os::raw::c_ulong;
 
 #[command]
 pub async fn player_load(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     xid_state: State<'_, Mutex<WindowXidState>>,
     wayland_state: State<'_, Mutex<WaylandState>>,
     src: String,
 ) -> Result<PlayerState, String> {
     let xid = xid_state.lock().map_err(|e| e.to_string())?.get_xid();
     let child_xid = xid_state.lock().map_err(|e| e.to_string())?.get_child_xid();
-    let is_wayland = wayland_state.lock().map_err(|e| e.to_string())?.is_wayland();
+    let is_wayland = wayland_state
+        .lock()
+        .map_err(|e| e.to_string())?
+        .is_wayland();
     {
         let mut p = handle.lock().map_err(|e| e.to_string())?;
         // Prefer the dedicated child window so mpv video stays inside #video-surface.
@@ -38,7 +41,7 @@ pub async fn player_load(
 
 #[command]
 pub async fn player_set_fullscreen(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     fullscreen: bool,
 ) -> Result<PlayerState, String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -47,7 +50,9 @@ pub async fn player_set_fullscreen(
 }
 
 #[command]
-pub async fn player_play_pause(handle: State<'_, Mutex<MpvPlayer>>) -> Result<PlayerState, String> {
+pub async fn player_play_pause(
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
+) -> Result<PlayerState, String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
     frameforge_tauri_plugin_player::player_play_pause_inner(&mut p);
     Ok(PlayerState::from_mpv(&p))
@@ -55,7 +60,7 @@ pub async fn player_play_pause(handle: State<'_, Mutex<MpvPlayer>>) -> Result<Pl
 
 #[command]
 pub async fn player_seek(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     seconds: f64,
 ) -> Result<PlayerState, String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -65,7 +70,7 @@ pub async fn player_seek(
 
 #[command]
 pub async fn player_set_speed(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     rate: f64,
 ) -> Result<PlayerState, String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -75,7 +80,7 @@ pub async fn player_set_speed(
 
 #[command]
 pub async fn player_set_volume(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     volume: f64,
 ) -> Result<PlayerState, String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -85,7 +90,7 @@ pub async fn player_set_volume(
 
 #[command]
 pub async fn player_set_muted(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     muted: bool,
 ) -> Result<PlayerState, String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -94,16 +99,16 @@ pub async fn player_set_muted(
 }
 
 #[command]
-pub async fn player_step_frame(handle: State<'_, Mutex<MpvPlayer>>) -> Result<PlayerState, String> {
+pub async fn player_step_frame(
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
+) -> Result<PlayerState, String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
     frameforge_tauri_plugin_player::player_step_frame_inner(&mut p);
     Ok(PlayerState::from_mpv(&p))
 }
 
 #[command]
-pub async fn player_toggle_fullscreen(
-    window: State<'_, WebviewWindow>,
-) -> Result<bool, String> {
+pub async fn player_toggle_fullscreen(window: State<'_, WebviewWindow>) -> Result<bool, String> {
     let current = window.is_fullscreen().unwrap_or(false);
     let next = !current;
     window.set_fullscreen(next).map_err(|e| e.to_string())?;
@@ -111,14 +116,14 @@ pub async fn player_toggle_fullscreen(
 }
 
 #[command]
-pub async fn player_state(handle: State<'_, Mutex<MpvPlayer>>) -> Result<PlayerState, String> {
+pub async fn player_state(handle: State<'_, Arc<Mutex<MpvPlayer>>>) -> Result<PlayerState, String> {
     let p = handle.lock().map_err(|e| e.to_string())?;
     Ok(PlayerState::from_mpv(&p))
 }
 
 #[command]
 pub async fn player_get_last_error(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
 ) -> Result<String, String> {
     let p = handle.lock().map_err(|e| e.to_string())?;
     Ok(frameforge_tauri_plugin_player::player_last_error(&p))
@@ -128,12 +133,15 @@ pub async fn player_get_last_error(
 pub async fn player_is_wayland(
     wayland_state: State<'_, Mutex<WaylandState>>,
 ) -> Result<bool, String> {
-    Ok(wayland_state.lock().map_err(|e| e.to_string())?.is_wayland())
+    Ok(wayland_state
+        .lock()
+        .map_err(|e| e.to_string())?
+        .is_wayland())
 }
 
 #[command]
 pub async fn player_set_hwdec(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     mode: String,
 ) -> Result<(), String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -143,7 +151,7 @@ pub async fn player_set_hwdec(
 
 #[command]
 pub async fn player_get_hwdec(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
 ) -> Result<Option<String>, String> {
     let p = handle.lock().map_err(|e| e.to_string())?;
     Ok(frameforge_tauri_plugin_player::player_get_hwdec(&p))
@@ -151,7 +159,7 @@ pub async fn player_get_hwdec(
 
 #[command]
 pub async fn player_set_vo(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     vo: String,
 ) -> Result<(), String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -161,7 +169,7 @@ pub async fn player_set_vo(
 
 #[command]
 pub async fn player_get_vo(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
 ) -> Result<Option<String>, String> {
     let p = handle.lock().map_err(|e| e.to_string())?;
     Ok(frameforge_tauri_plugin_player::player_get_vo(&p))
@@ -169,7 +177,7 @@ pub async fn player_get_vo(
 
 #[command]
 pub async fn player_get_volume(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
 ) -> Result<Option<f64>, String> {
     let p = handle.lock().map_err(|e| e.to_string())?;
     Ok(frameforge_tauri_plugin_player::player_get_volume(&p))
@@ -177,7 +185,7 @@ pub async fn player_get_volume(
 
 #[command]
 pub async fn player_get_speed(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
 ) -> Result<Option<f64>, String> {
     let p = handle.lock().map_err(|e| e.to_string())?;
     Ok(frameforge_tauri_plugin_player::player_get_speed(&p))
@@ -212,3 +220,4 @@ pub async fn player_resize_child_window(
     let _ = (child, x, y, width, height);
     Ok(())
 }
+use std::sync::Arc;

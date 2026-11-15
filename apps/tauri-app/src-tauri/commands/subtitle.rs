@@ -6,7 +6,7 @@ use tauri::{command, State};
 
 #[command]
 pub async fn player_get_tracks(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
 ) -> Result<Vec<TrackInfoResponse>, String> {
     let p = handle.lock().map_err(|e| e.to_string())?;
     let tracks = p.get_tracks().map_err(|e| e.to_string())?;
@@ -24,7 +24,7 @@ pub async fn player_get_tracks(
 
 #[command]
 pub async fn player_select_subtitle_track(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     index: u32,
 ) -> Result<(), String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -34,7 +34,9 @@ pub async fn player_select_subtitle_track(
 }
 
 #[command]
-pub async fn player_disable_subtitles(handle: State<'_, Mutex<MpvPlayer>>) -> Result<(), String> {
+pub async fn player_disable_subtitles(
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
+) -> Result<(), String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
     frameforge_tauri_plugin_player::player_disable_subtitles_inner(&mut p)
         .map_err(|e| e.to_string())?;
@@ -43,7 +45,7 @@ pub async fn player_disable_subtitles(handle: State<'_, Mutex<MpvPlayer>>) -> Re
 
 #[command]
 pub async fn player_set_subtitle_visibility(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     visible: bool,
 ) -> Result<(), String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -54,7 +56,7 @@ pub async fn player_set_subtitle_visibility(
 
 #[command]
 pub async fn player_set_subtitle_delay(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     seconds: f64,
 ) -> Result<(), String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -65,7 +67,7 @@ pub async fn player_set_subtitle_delay(
 
 #[command]
 pub async fn player_load_subtitle(
-    handle: State<'_, Mutex<MpvPlayer>>,
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
     path: String,
 ) -> Result<(), String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
@@ -83,3 +85,4 @@ pub async fn open_subtitle_dialog() -> Result<Option<String>, String> {
         .await;
     Ok(files.map(|f| f.path().to_string_lossy().to_string()))
 }
+use std::sync::Arc;

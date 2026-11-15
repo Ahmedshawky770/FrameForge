@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use frameforge_export_engine::CancelToken;
 use serde::{Deserialize, Serialize};
 
@@ -190,14 +188,14 @@ pub struct CompatibilityInfo {
 #[derive(Debug, Default)]
 pub struct ExportState {
     /// 0.0 ..= 1.0 progress of the current export.
-    pub progress: Mutex<f32>,
+    pub progress: f32,
     /// Cancellation token shared with the export executor.
     pub cancel: CancelToken,
 }
 
 impl ExportState {
     pub fn reset(&mut self) {
-        *self.progress.lock().unwrap() = 0.0;
+        self.progress = 0.0;
         self.cancel = CancelToken::new();
     }
 }

@@ -1,4 +1,6 @@
-use crate::state::{AVAILABLE_LOCALES, LocaleInfo, LocaleState, ThemeInfo, ThemeState, locale_direction};
+use crate::state::{
+    locale_direction, LocaleInfo, LocaleState, ThemeInfo, ThemeState, AVAILABLE_LOCALES,
+};
 use std::sync::Mutex;
 use tauri::{command, State};
 

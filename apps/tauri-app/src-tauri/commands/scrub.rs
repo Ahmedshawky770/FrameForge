@@ -31,9 +31,16 @@ pub async fn player_scrub_seek(
     s.latency.record(elapsed);
 
     let data_url = if let Some(ref frame) = result.frame {
-        let mime = "image/rgba";
-        let encoded = general_purpose::STANDARD.encode(&frame.data);
-        format!("data:{mime};base64,{encoded}")
+        let mut png_buf = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut png_buf, frame.width, frame.height);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut w = enc.write_header().map_err(|e| e.to_string())?;
+            w.write_image_data(&frame.data).map_err(|e| e.to_string())?;
+        }
+        let encoded = general_purpose::STANDARD.encode(&png_buf);
+        format!("data:image/png;base64,{encoded}")
     } else {
         String::new()
     };
@@ -70,9 +77,16 @@ pub async fn player_scrub_next_frame(
 
     let frame_result = if let Some(frame) = result {
         let data_url = {
-            let mime = "image/rgba";
-            let encoded = general_purpose::STANDARD.encode(&frame.data);
-            format!("data:{mime};base64,{encoded}")
+            let mut png_buf = Vec::new();
+            {
+                let mut enc = png::Encoder::new(&mut png_buf, frame.width, frame.height);
+                enc.set_color(png::ColorType::Rgba);
+                enc.set_depth(png::BitDepth::Eight);
+                let mut w = enc.write_header().map_err(|e| e.to_string())?;
+                w.write_image_data(&frame.data).map_err(|e| e.to_string())?;
+            }
+            let encoded = general_purpose::STANDARD.encode(&png_buf);
+            format!("data:image/png;base64,{encoded}")
         };
         ScrubFrameResult {
             data_url,
@@ -112,9 +126,16 @@ pub async fn player_scrub_prev_frame(
 
     let frame_result = if let Some(frame) = result {
         let data_url = {
-            let mime = "image/rgba";
-            let encoded = general_purpose::STANDARD.encode(&frame.data);
-            format!("data:{mime};base64,{encoded}")
+            let mut png_buf = Vec::new();
+            {
+                let mut enc = png::Encoder::new(&mut png_buf, frame.width, frame.height);
+                enc.set_color(png::ColorType::Rgba);
+                enc.set_depth(png::BitDepth::Eight);
+                let mut w = enc.write_header().map_err(|e| e.to_string())?;
+                w.write_image_data(&frame.data).map_err(|e| e.to_string())?;
+            }
+            let encoded = general_purpose::STANDARD.encode(&png_buf);
+            format!("data:image/png;base64,{encoded}")
         };
         ScrubFrameResult {
             data_url,

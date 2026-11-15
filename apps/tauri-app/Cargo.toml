@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+png = "0.18"
 tauri = { workspace = true }
 frameforge-tauri-plugin-player = { path = "../../crates/tauri-plugin-player" }
 frameforge-mpv-adapter = { path = "../../crates/mpv-adapter" }
