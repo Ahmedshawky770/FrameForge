@@ -64,11 +64,25 @@ pub async fn player_scrub_seek(
 #[command]
 pub async fn player_scrub_next_frame(
     scrub: State<'_, Mutex<ScrubState>>,
+    path: String,
+    seconds: f64,
 ) -> Result<ScrubFrameResult, String> {
     let start = Instant::now();
 
     let mut s = scrub.lock().map_err(|e| e.to_string())?;
-    let session = s.session.as_mut().ok_or("no active scrub session")?;
+    let tb = Timebase::new(1, 1_000_000);
+    let ts = Timestamp::new((seconds * 1_000_000.0) as i64, tb);
+
+    let session = s.session.get_or_insert_with(ScrubSession::new);
+    // Ensure the session is open on the requested file and positioned.
+    if session.current_path.as_deref() != Some(std::path::Path::new(&path)) {
+        session
+            .open_file(std::path::Path::new(&path))
+            .map_err(|e| e.to_string())?;
+        let _ = session.seek(ts);
+    } else if session.current_pts.is_none() {
+        let _ = session.seek(ts);
+    }
 
     let result = session.next_frame().map_err(|e| e.to_string())?;
 
@@ -113,11 +127,24 @@ pub async fn player_scrub_next_frame(
 #[command]
 pub async fn player_scrub_prev_frame(
     scrub: State<'_, Mutex<ScrubState>>,
+    path: String,
+    seconds: f64,
 ) -> Result<ScrubFrameResult, String> {
     let start = Instant::now();
 
     let mut s = scrub.lock().map_err(|e| e.to_string())?;
-    let session = s.session.as_mut().ok_or("no active scrub session")?;
+    let tb = Timebase::new(1, 1_000_000);
+    let ts = Timestamp::new((seconds * 1_000_000.0) as i64, tb);
+
+    let session = s.session.get_or_insert_with(ScrubSession::new);
+    if session.current_path.as_deref() != Some(std::path::Path::new(&path)) {
+        session
+            .open_file(std::path::Path::new(&path))
+            .map_err(|e| e.to_string())?;
+        let _ = session.seek(ts);
+    } else if session.current_pts.is_none() {
+        let _ = session.seek(ts);
+    }
 
     let result = session.prev_frame().map_err(|e| e.to_string())?;
 

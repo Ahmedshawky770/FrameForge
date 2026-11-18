@@ -16,7 +16,7 @@
       --surface-active: #2a2a2a;
       --text: #f0f0f0;
       --text-muted: #94a3b8;
-      --text-subtle: #64748b;
+      --text-subtle: #7c8aa5;
       --accent: #4a90e2;
       --accent-hover: #3a7bc8;
       --accent-active: #2f6bb0;
@@ -165,8 +165,7 @@
       inset: 0;
       width: 100%;
       height: 100%;
-      -o-object-fit: contain;
-         object-fit: contain;
+      object-fit: contain;
       background: #000;
       display: block;
     }
@@ -195,8 +194,7 @@
     #video-surface #scrub-preview img {
       max-width: 95%;
       max-height: 95%;
-      -o-object-fit: contain;
-         object-fit: contain;
+      object-fit: contain;
       border: 2px solid var(--accent);
       box-shadow: var(--shadow-lg);
       border-radius: var(--radius-sm);
@@ -205,9 +203,8 @@
     /* ============================================================
        OVERLAY & PLAY BUTTON
        ============================================================ */
-    #overlay { position: absolute; inset: 0; pointer-events: none; z-index: 20; background: rgba(0, 0, 0, 0.35); }
+    #overlay { position: absolute; inset: 0; pointer-events: none; z-index: 20; background: transparent; }
     /* overlay stays click-through; play-overlay inside it handles play/pause clicks */
-    #timeline { grid-row: 2; grid-column: 1 / -1; background: var(--surface); border-top: 1px solid var(--border); z-index: 100; pointer-events: auto; }
     #play-overlay {
       position: absolute;
       inset: 0;
@@ -215,10 +212,9 @@
       align-items: center;
       justify-content: center;
       background: rgba(0, 0, 0, 0.4);
-      cursor: pointer;
-      transition: opacity var(--transition-base), transform var(--transition-base);
-      border-radius: var(--radius-full);
-    }
+       cursor: pointer;
+       transition: opacity var(--transition-base), transform var(--transition-base);
+     }
     #play-overlay.hidden { opacity: 0; pointer-events: none; }
     #play-overlay:hover { background: rgba(0, 0, 0, 0.6); }
     #play-icon {
@@ -312,6 +308,24 @@
       text-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
       white-space: nowrap;
     }
+    .time-edit-input {
+      width: 78px;
+      font: inherit;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: 0 var(--space-1);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      outline: none;
+    }
+    .time-edit-input:focus {
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+    #time-display.time-editing { cursor: text; }
+    #time-display { cursor: pointer; }
+    #video-current-time { cursor: pointer; }
 
     /* ============================================================
        TIMELINE — إعادة تصميم شاملة
@@ -375,7 +389,7 @@
       pointer-events: none;
       z-index: var(--z-scrub-preview);
     }
-    .timeline-scrub-preview img { width: 100%; height: 100%; -o-object-fit: cover; object-fit: cover; border-radius: var(--radius-sm); }
+    .timeline-scrub-preview img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-sm); }
     .timeline-scrub-preview.show { display: block; }
 
     .timeline-thumb {
@@ -436,7 +450,7 @@
       border-color: var(--border-focus);
     }
     button:active:not(:disabled) {
-      transform: translateY(0);
+      transform: translateY(1px);
       background: var(--surface-active);
     }
     button:focus-visible {
@@ -467,6 +481,11 @@
     button.secondary:hover:not(:disabled) {
       background: var(--surface-hover);
       color: var(--text);
+    }
+    button.secondary.active {
+       background: var(--accent);
+       color: #fff;
+       border-color: var(--accent);
     }
     button.danger {
       background: var(--danger);
@@ -517,9 +536,7 @@
       outline-offset: var(--focus-offset);
     }
     select {
-      -webkit-appearance: none;
-         -moz-appearance: none;
-              appearance: none;
+      appearance: none;
       background: var(--surface-hover);
       color: var(--text);
       border: 1px solid var(--border);
@@ -576,9 +593,7 @@
       font-size: 0.8rem;
       color: var(--text-muted);
       min-width: 55px;
-      -webkit-user-select: none;
-         -moz-user-select: none;
-              user-select: none;
+      user-select: none;
       font-weight: 500;
     }
     #locale-toggle, #theme-toggle { font-size: 0.8rem; padding: var(--space-1) var(--space-2); }
@@ -587,9 +602,7 @@
       color: var(--text-muted);
       margin-top: var(--space-2);
       text-align: center;
-      -webkit-user-select: none;
-         -moz-user-select: none;
-              user-select: none;
+      user-select: none;
     }
 
     /* Reduced motion */
@@ -698,9 +711,7 @@
       cursor: grab;
       color: var(--text-muted);
       font-size: 1.125rem;
-      -webkit-user-select: none;
-         -moz-user-select: none;
-              user-select: none;
+      user-select: none;
     }
     .clip-item .clip-handle:active { cursor: grabbing; }
     .clip-item .clip-name {
@@ -746,18 +757,18 @@
        COMPATIBILITY BADGE
        ============================================================ */
     .compat-good {
-      background: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
+      background: rgba(46, 204, 113, 0.15);
+      color: var(--success);
+      border: 1px solid var(--success);
     }
     .compat-bad {
-      background: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
+      background: rgba(231, 76, 60, 0.15);
+      color: var(--danger);
+      border: 1px solid var(--danger);
     }
 
     /* ============================================================
-       RESPONSIVE DESIGN — التصميم الم.adjacent
+       RESPONSIVE DESIGN — التصميم المتجاوب
        ============================================================ */
 
     /* ============================================================
@@ -805,14 +816,6 @@
     /* ============================================================
        PROJECT PANEL — إعادة تصميم لوحة المشروع
        ============================================================ */
-    #project-panel {
-      position: relative;
-      z-index: 100;
-      padding: var(--space-4);
-      background: var(--surface);
-      border-top: 1px solid var(--border);
-      overflow-y: auto;
-    }
     #project-panel h3 {
       margin: 0 0 var(--space-3) 0;
       color: var(--text);
@@ -832,6 +835,22 @@
       letter-spacing: 0.05em;
     }
 
+    #preview-edit-controls {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+      margin-top: var(--space-2);
+    }
+    .preview-edit-actions {
+      display: flex;
+      gap: var(--space-2);
+      flex-wrap: wrap;
+    }
+    #duration-counter {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
     #clip-list {
       display: flex;
       flex-direction: column;
@@ -916,10 +935,12 @@
     }
 
 /* ============================================================
-       RESPONSIVE DESIGN — التصميم الم.adjacent
+       RESPONSIVE DESIGN — التصميم المتجاوب
        ============================================================ */
     /* Below 1024px: project panel becomes a collapsible drawer, not hidden */
     @media (max-width: 1024px) {
+      #timeline { flex-wrap: wrap; }
+      .toolbar-group { flex-wrap: wrap; }
       #app {
         grid-template-columns: 1fr;
         grid-template-rows: 1fr auto auto;
@@ -999,7 +1020,6 @@
       #project-panel.collapsed { max-height: 0; }
       #video-surface #placeholder { padding: var(--space-4); }
       #clip-list { max-height: 160px; padding: var(--space-1); }
-    }
       .export-controls {
         grid-template-columns: 1fr;
         gap: var(--space-2);
@@ -1012,16 +1032,11 @@
         flex: 1;
         white-space: normal;
       }
-      #export-dialog {
-        width: 95%;
-        margin: var(--space-4);
-        padding: var(--space-4);
-      }
       #keyboard-hint {
         font-size: 0.65rem;
         padding: 0 var(--space-2);
       }
-    
+    }
 
     @media (max-width: 480px) {
       #project-panel { max-height: 30vh; }
@@ -1262,17 +1277,17 @@
     }
     
   </style>
-  <script type="module" crossorigin src="/assets/index-BiVCQqcb.js"></script>
+  <script type="module" crossorigin src="/assets/index-SpDoyL6u.js"></script>
 </head>
 <body>
-  <a id="skip-to-content" href="#main-content">Skip to main content</a>
+  <a id="skip-to-content" href="#app">Skip to main content</a>
 
-  <div id="app" id="main-content" tabindex="-1">
+  <div id="app" tabindex="-1">
     <div id="video-surface" role="region" aria-label="Video player">
       <div id="overlay">
         <div id="play-overlay" role="button" aria-label="Play video" tabindex="0">
-          <div id="play-icon" aria-hidden="true">▶</div>
-          <div id="pause-icon" aria-hidden="true">⏸</div>
+          <div id="play-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+          <div id="pause-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></div>
         </div>
         <!-- Hover progress bar + time readout over the video -->
         <div id="video-controls" class="hidden">
@@ -1298,11 +1313,12 @@
         <button id="btn-scrub-next" disabled aria-label="Scrub next frame" data-i18n="btn.scrubNext">Next Frame</button>
       </div>
       <div class="toolbar-divider" aria-hidden="true"></div>
-      <div class="timeline-bar" id="timeline-bar" role="slider" aria-label="Timeline seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
-        <div class="timeline-progress" id="timeline-progress"></div>
+<div class="timeline-bar" id="timeline-bar" role="slider" aria-label="Timeline seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+         <div id="deleted-overlay" style="position:absolute;inset:0;pointer-events:none;z-index:5;overflow:hidden;"></div>
+         <div class="timeline-progress" id="timeline-progress"></div>
         <div class="timeline-markers" id="timeline-markers"></div>
         <div class="timeline-thumb" id="timeline-thumb"></div>
-        <div class="split-indicator"></div>
+        <div class="split-indicator" id="split-indicator"></div>
       </div>
       <div class="timeline-scrub-preview" id="timeline-scrub-preview">
         <img id="timeline-scrub-img" />
@@ -1330,7 +1346,7 @@
       <div class="row">
         <label for="volume-bar" data-i18n="label.volume">Volume</label>
         <input type="range" id="volume-bar" min="0" max="1" step="0.05" value="1" aria-label="Volume" />
-        <button id="btn-mute" class="icon" aria-label="Toggle mute" data-i18n="btn.mute">🔇</button>
+        <button id="btn-mute" class="icon" aria-label="Toggle mute" data-i18n="btn.mute"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></button>
       </div>
       <div class="toolbar-divider" aria-hidden="true"></div>
       <div class="toolbar-group">
@@ -1343,7 +1359,7 @@
         </div>
         <button id="btn-theme" aria-label="Toggle theme" data-i18n="btn.theme">Theme</button>
         <button id="btn-fullscreen" disabled aria-label="Toggle fullscreen" data-i18n="btn.fullscreen">Fullscreen</button>
-        <button id="btn-diagnostics" disabled aria-label="Show diagnostics" title="Show mpv diagnostics">🔧</button>
+        <button id="btn-diagnostics" disabled aria-label="Show diagnostics" title="Show mpv diagnostics"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
       </div>
       <div id="status" class="status" data-i18n="status.idle" aria-live="polite">Idle</div>
     </div>
@@ -1351,7 +1367,7 @@
     <!-- Project panel -->
     <div id="project-panel" role="region" aria-label="Project editor" aria-expanded="true">
       <h3 id="project-heading">Project</h3>
-      <button id="btn-toggle-panel" class="icon" aria-label="Collapse project panel" title="Collapse/expand">▼</button>
+      <button id="btn-toggle-panel" class="icon" aria-label="Collapse project panel" title="Collapse/expand"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
 
       <!-- Merge button -->
       <button id="btn-show-merge" class="secondary" data-i18n="btn.merge">Merge Videos</button>
@@ -1361,13 +1377,21 @@
         <h4 data-i18n="label.deleteRanges">Delete Ranges</h4>
         <div class="delete-range-inputs">
           <label>From:</label>
-          <input id="del-from" type="text" placeholder="00:00:00" />
+          <input id="del-from" type="text" placeholder="00:00:00.000" />
           <label>To:</label>
-          <input id="del-to" type="text" placeholder="00:00:00" />
+          <input id="del-to" type="text" placeholder="00:00:00.000" />
           <button id="btn-add-delete-range" data-i18n="btn.addDeleteRange">Add</button>
         </div>
-        <ul id="delete-ranges-list" role="list"></ul>
-        <button id="btn-export-deleted" class="primary" data-i18n="btn.exportDeleted">Export Without Deleted</button>
+<ul id="delete-ranges-list" role="list"></ul>
+         <!-- Preview edit controls -->
+         <div id="preview-edit-controls">
+           <div id="duration-counter">Original 0:00 ← Output 0:00</div>
+           <div class="preview-edit-actions">
+             <button id="btn-preview-edit" class="secondary" title="Toggle edited/original preview (P)" data-i18n="btn.previewEdit">Preview: Edited</button>
+             <button id="btn-preview-around-cut" class="secondary" title="Play 3s before and after each cut" data-i18n="btn.previewAroundCut">Around Cut</button>
+           </div>
+         </div>
+         <button id="btn-export-deleted" class="primary" data-i18n="btn.exportDeleted">Export Without Deleted</button>
       </div>
 
       <!-- Clip list -->
@@ -1389,6 +1413,7 @@
       <div class="export-controls">
         <label for="export-encoder" data-i18n="label.encoder">Encoder</label>
         <select id="export-encoder" aria-label="Export encoder">
+          <option value="copy">Copy (lossless stream copy)</option>
           <option value="x264">x264 (H.264)</option>
           <option value="x265">x265 (H.265/HEVC)</option>
           <option value="svtav1">SVT-AV1</option>
@@ -1429,7 +1454,7 @@
 
   <!-- Merge page -->
   <div id="merge-page" style="display:none; height:100%; overflow-y:auto; padding:var(--space-4);">
-    <header style="display:flex; align-items:center; gap:var(--space-3); margin-bottom:var(--space-4);">
+    <header>
       <button id="btn-back-merge" data-i18n="btn.back">Back</button>
       <h1 data-i18n="label.mergeTitle">Merge Videos</h1>
       <button id="btn-merge-add" class="primary" data-i18n="btn.mergeAdd">Add Videos</button>
@@ -1440,6 +1465,8 @@
     </div>
     <div id="merge-empty" role="status" aria-live="polite" data-i18n="label.mergeEmpty">No videos added. Click "Add Videos" to select files.</div>
   </div>
+
+
 
 </body>
 </html>

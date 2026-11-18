@@ -1,0 +1,1484 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head><script>
+window.__TAURI_INTERNALS__ = { invoke: async (cmd, args) => {
+  console.log('INVOKE', cmd, args);
+  if (cmd === 'locale_get') return { current: 'en' };
+  if (cmd === 'theme_get') return { current: 'system' };
+  if (cmd === 'player_state') return { paused: true, current_time: 0, duration: 10 };
+  if (cmd === 'player_is_wayland') return false;
+  if (cmd === 'save_file_dialog' || cmd === 'open_file_dialog' || cmd === 'load_project_dialog' || cmd === 'save_project_dialog') return null;
+  if (cmd === 'open_video_files_dialog') return [];
+  return null;
+} };
+window.__TAURI__ = { core: { invoke: window.__TAURI_INTERNALS__.invoke } };
+</script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FrameForge — Video Player</title>
+  <style>
+    /* ============================================================
+       DESIGN TOKENS — نظام المتغيرات الموحد
+       ============================================================ */
+    :root {
+      /* --- Colors (Dark) --- */
+      --bg: #0a0a0a;
+      --surface: #131313;
+      --surface-hover: #1e1e1e;
+      --surface-active: #2a2a2a;
+      --text: #f0f0f0;
+      --text-muted: #94a3b8;
+      --text-subtle: #7c8aa5;
+      --accent: #4a90e2;
+      --accent-hover: #3a7bc8;
+      --accent-active: #2f6bb0;
+      --border: #3a3a3a;
+      --border-focus: #4a90e2;
+      --danger: #e74c3c;
+      --danger-hover: #c0392b;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --scrub-preview-bg: #000;
+
+      /* --- Spacing Scale (4px grid) --- */
+      --space-0: 0;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --space-8: 32px;
+      --space-10: 40px;
+      --space-12: 48px;
+      --space-16: 64px;
+
+      /* --- Border Radius --- */
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --radius-xl: 12px;
+      --radius-full: 9999px;
+
+      /* --- Shadows --- */
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+      --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.5);
+
+      /* --- Transitions --- */
+      --transition-fast: 0.15s ease;
+      --transition-base: 0.2s ease;
+      --transition-slow: 0.3s ease;
+
+      /* --- Focus / Accessibility --- */
+      --focus-ring: 2px solid var(--accent);
+      --focus-offset: 2px;
+
+      /* --- Timeline --- */
+      --timeline-height: 52px;
+      --timeline-bar-height: 6px;
+      --timeline-thumb-size: 20px;
+
+      /* --- Typography --- */
+      --font-body: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      --font-arabic: "Noto Sans Arabic", "Tajawal", system-ui, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
+
+      /* --- Z-Index --- */
+      --z-dropdown: 100;
+      --z-sticky: 200;
+      --z-modal-backdrop: 500;
+      --z-modal: 600;
+      --z-toast: 1000;
+      --z-scrub-preview: 100;
+    }
+
+    [data-theme="light"] {
+      /* --- Colors (Light) --- */
+      --bg: #f5f5f5;
+      --surface: #ffffff;
+      --surface-hover: #f0f0f0;
+      --surface-active: #e5e5e5;
+      --text: #1a1a1a;
+      --text-muted: #6b7280;
+      --text-subtle: #9ca3af;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --accent-active: #1e40af;
+      --border: #d1d5db;
+      --border-focus: #2563eb;
+      --danger: #dc2626;
+      --danger-hover: #b91c1c;
+      --success: #059669;
+      --warning: #d97706;
+    }
+
+    /* ============================================================
+       RESET & BASE
+       ============================================================ */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 14px;
+      line-height: 1.5;
+      overflow-y: auto;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    #app { height: 100%; position: relative; display: grid; grid-template-rows: 1fr auto; grid-template-columns: 1fr 320px; background: var(--bg); overflow: visible; gap: 0; }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ============================================================
+       ACCESSIBILITY — Skip to content
+       ============================================================ */
+    #skip-to-content {
+      position: absolute;
+      left: -9999px;
+      top: auto;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      z-index: -1;
+    }
+    #skip-to-content:focus {
+      position: static;
+      width: auto;
+      height: auto;
+      overflow: visible;
+      z-index: var(--z-modal);
+      padding: var(--space-2) var(--space-4);
+      background: var(--accent);
+      color: #fff;
+      border-radius: var(--radius-md);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    /* ============================================================
+       RTL LAYOUT
+       ============================================================ */
+    [dir="rtl"] #app { direction: rtl; }
+    [dir="rtl"] button { direction: rtl; }
+
+    /* ============================================================
+       VIDEO SURFACE
+       ============================================================ */
+    #video-surface { grid-row: 1; grid-column: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; z-index: 10; pointer-events: none; padding: var(--space-4); box-sizing: border-box; }
+    /* ضمان عدم خروج الوسائط عن السطح وحمايتها خلف عناصر التحكم */
+    #video-surface video,
+    #video-surface object,
+    #video-surface embed {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+      display: block;
+    }
+    /* UI controls above video — overlay stays click-through (semi-transparent black backdrop) */
+    #play-overlay, #timeline, #project-panel, #toast, #export-modal {
+        pointer-events: auto;
+    }
+    #video-surface #placeholder {
+      color: var(--text-muted);
+      font-size: 1.125rem;
+      text-align: center;
+      padding: var(--space-6);
+      max-width: 80%;
+      position: relative;
+      z-index: 30;
+    }
+    #video-surface #scrub-preview {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 15;
+      background: rgba(0, 0, 0, 0.6);
+    }
+    #video-surface #scrub-preview img {
+      max-width: 95%;
+      max-height: 95%;
+      object-fit: contain;
+      border: 2px solid var(--accent);
+      box-shadow: var(--shadow-lg);
+      border-radius: var(--radius-sm);
+    }
+
+    /* ============================================================
+       OVERLAY & PLAY BUTTON
+       ============================================================ */
+    #overlay { position: absolute; inset: 0; pointer-events: none; z-index: 20; background: transparent; }
+    /* overlay stays click-through; play-overlay inside it handles play/pause clicks */
+    #play-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.4);
+       cursor: pointer;
+       transition: opacity var(--transition-base), transform var(--transition-base);
+     }
+    #play-overlay.hidden { opacity: 0; pointer-events: none; }
+    #play-overlay:hover { background: rgba(0, 0, 0, 0.6); }
+    #play-icon {
+      font-size: 3rem;
+      color: rgba(255, 255, 255, 0.9);
+      filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.5));
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 64px;
+      height: 64px;
+      border-radius: var(--radius-full);
+      background: rgba(0, 0, 0, 0.3);
+    }
+    #pause-icon {
+      display: none;
+      font-size: 2.5rem;
+      color: rgba(255, 255, 255, 0.9);
+      filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.5));
+      margin-left: 4px;
+    }
+
+    /* Hover controls over video — fade in/out smoothly */
+    #video-controls {
+      position: absolute;
+      inset: auto 0 0 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-3) var(--space-4);
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
+      border-radius: 0 0 var(--radius-md) var(--radius-md);
+      z-index: 25;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--transition-base) ease, transform var(--transition-base) ease;
+      transform: translateY(10px);
+    }
+    #video-surface:hover #video-controls,
+    #video-controls:hover {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    #video-controls.hidden {
+      opacity: 0 !important;
+      transform: translateY(10px) !important;
+      pointer-events: none !important;
+    }
+
+    #video-progress-bar {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.25);
+      border-radius: var(--radius-full);
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
+    #video-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      border-radius: var(--radius-full);
+      transition: width var(--transition-fast) linear;
+    }
+    #video-progress-thumb {
+      position: absolute;
+      left: 0%;
+      top: 50%;
+      width: 12px;
+      height: 12px;
+      background: var(--text);
+      border-radius: var(--radius-full);
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+      pointer-events: none;
+      transition: left var(--transition-fast) linear;
+    }
+
+    #video-time {
+      display: flex;
+      gap: var(--space-2);
+      font-size: 0.75rem;
+      color: var(--text);
+      font-family: var(--font-mono);
+      text-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+      white-space: nowrap;
+    }
+    .time-edit-input {
+      width: 78px;
+      font: inherit;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: 0 var(--space-1);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      outline: none;
+    }
+    .time-edit-input:focus {
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+    #time-display.time-editing { cursor: text; }
+    #time-display { cursor: pointer; }
+    #video-current-time { cursor: pointer; }
+
+    /* ============================================================
+       TIMELINE — إعادة تصميم شاملة
+       ============================================================ */
+    #timeline {
+      grid-row: 2;
+      grid-column: 1 / -1;
+      height: auto;
+      min-height: var(--timeline-height);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-2);
+      padding: 0 var(--space-4);
+      position: relative;
+      z-index: 100;
+      flex-shrink: 0;
+      box-shadow: var(--shadow-sm);
+      box-sizing: border-box;
+      min-width: 0;
+    }
+    #project-panel { grid-row: 1; grid-column: 2; position: relative; z-index: 100; padding: var(--space-4); background: var(--surface); border-left: 1px solid var(--border); pointer-events: auto; overflow-y: auto; box-sizing: border-box; min-height: 0; }
+    #timeline.hidden { transform: translateY(100%); }
+    #timeline.visible { transform: translateY(0); transition: transform var(--transition-slow); }
+
+    .toolbar-group { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
+    .toolbar-divider { width: 1px; background: var(--border); height: 20px; margin: 0 var(--space-1); }
+    .flex-spacer { flex: 1; min-width: 0; }
+
+    .timeline-bar {
+      flex: 1;
+      min-width: 120px;
+      height: var(--timeline-bar-height);
+      background: #333;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      touch-action: none;
+    }
+    .timeline-bar[dir="rtl"] { direction: rtl; }
+    .timeline-progress {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      border-radius: var(--radius-md);
+      transition: width var(--transition-fast);
+    }
+
+    .timeline-scrub-preview {
+      position: absolute;
+      width: 180px;
+      height: 100px;
+      background: var(--scrub-preview-bg);
+      border: 2px solid var(--accent);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-lg);
+      display: none;
+      pointer-events: none;
+      z-index: var(--z-scrub-preview);
+    }
+    .timeline-scrub-preview img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-sm); }
+    .timeline-scrub-preview.show { display: block; }
+
+    .timeline-thumb {
+      width: var(--timeline-thumb-size);
+      height: var(--timeline-thumb-size);
+      background: var(--accent);
+      border: 2px solid #fff;
+      border-radius: var(--radius-full);
+      position: absolute;
+      top: 50%;
+      left: 0%;
+      transform: translate(-50%, -50%);
+      cursor: pointer;
+      z-index: 10;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.7);
+      transition: transform var(--transition-fast);
+    }
+    .timeline-thumb:hover { transform: translate(-50%, -50%) scale(1.15); }
+    .timeline-thumb:active { transform: translate(-50%, -50%) scale(1.3); }
+
+    .timeline-markers {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 100%;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .timeline-marker {
+      position: absolute;
+      width: 1px;
+      height: 6px;
+      background: var(--text-subtle);
+      top: 0;
+      opacity: 0.5;
+    }
+
+    /* ============================================================
+       BUTTON SYSTEM — تصميم الأزرار الموحد
+       ============================================================ */
+    button {
+      background: var(--surface-hover);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: var(--space-1) var(--space-3);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      line-height: 1.4;
+      transition: all var(--transition-base);
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    button:hover:not(:disabled) {
+      background: var(--surface-active);
+      border-color: var(--border-focus);
+    }
+    button:active:not(:disabled) {
+      transform: translateY(1px);
+      background: var(--surface-active);
+    }
+    button:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    button.primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+    button.primary:active:not(:disabled) {
+      background: var(--accent-active);
+    }
+    button.secondary {
+      background: transparent;
+      border-color: transparent;
+      color: var(--text-muted);
+    }
+    button.secondary:hover:not(:disabled) {
+      background: var(--surface-hover);
+      color: var(--text);
+    }
+    button.secondary.active {
+       background: var(--accent);
+       color: #fff;
+       border-color: var(--accent);
+    }
+    button.danger {
+      background: var(--danger);
+      border-color: var(--danger);
+      color: #fff;
+    }
+    button.danger:hover:not(:disabled) {
+      background: var(--danger-hover);
+      border-color: var(--danger-hover);
+    }
+    button.icon {
+      padding: var(--space-2);
+      min-width: auto;
+      aspect-ratio: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    button.loading {
+      position: relative;
+      color: transparent !important;
+      pointer-events: none;
+    }
+    button.loading::after {
+      content: "";
+      position: absolute;
+      inset: 50%;
+      width: 14px;
+      height: 14px;
+      margin: -7px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: var(--radius-full);
+      animation: spin 0.8s linear infinite;
+    }
+    [dir="rtl"] button.primary { direction: rtl; }
+
+    /* ============================================================
+       FORMS — inputs, selects, ranges
+       ============================================================ */
+    input[type=range] {
+      accent-color: var(--accent);
+      cursor: pointer;
+      height: 6px;
+    }
+    input[type=range]:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+    select {
+      appearance: none;
+      background: var(--surface-hover);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: var(--space-1) var(--space-3);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-family: inherit;
+      min-height: 32px;
+    }
+    select option {
+      background: var(--surface);
+      color: var(--text);
+    }
+    select:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+    input[type=text], input[type=number] {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: var(--space-1) var(--space-3);
+      font-size: 0.875rem;
+      font-family: inherit;
+      min-height: 32px;
+      width: 100%;
+    }
+    input[type=text]:focus-visible, input[type=number]:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+      border-color: var(--border-focus);
+    }
+
+    /* ============================================================
+       COMPONENTS
+       ============================================================ */
+    .status {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-left: auto;
+      white-space: nowrap;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      flex: 1;
+      min-width: 180px;
+      box-sizing: border-box;
+    }
+    .row label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      min-width: 55px;
+      user-select: none;
+      font-weight: 500;
+    }
+    #locale-toggle, #theme-toggle { font-size: 0.8rem; padding: var(--space-1) var(--space-2); }
+    #keyboard-hint {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-top: var(--space-2);
+      text-align: center;
+      user-select: none;
+    }
+
+    /* Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      #play-overlay, #timeline.visible, .timeline-progress { transition: none !important; }
+      #toast { transition: none !important; }
+      .timeline-thumb { transition: none !important; }
+    }
+
+    /* Toast notification */
+    #toast {
+      position: fixed;
+      bottom: var(--space-6);
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: var(--space-2) var(--space-4);
+      border-radius: var(--radius-md);
+      font-size: .875rem;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity var(--transition-base), transform var(--transition-base);
+      z-index: var(--z-toast);
+      box-shadow: var(--shadow-lg);
+      white-space: nowrap;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* Language switcher dropdown */
+    .dropdown { position: relative; display: inline-block; }
+    .dropdown-content {
+      display: none;
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      min-width: 140px;
+      max-width: min(260px, calc(100vw - var(--space-8)));
+      max-height: 60vh;
+      overflow-y: auto;
+      z-index: var(--z-dropdown);
+      box-shadow: var(--shadow-lg);
+      transform-origin: top left;
+    }
+    .dropdown-content.show {
+      display: block;
+      animation: fadeIn var(--transition-fast);
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .dropdown-item {
+      padding: var(--space-2) var(--space-3);
+      cursor: pointer;
+      color: var(--text);
+      font-size: .875rem;
+    }
+    .dropdown-item:hover { background: var(--surface-hover); }
+    .dropdown-item.active {
+      font-weight: bold;
+      color: var(--accent);
+      background: rgba(74, 144, 226, 0.1);
+    }
+
+    /* Latency badge */
+    .latency-badge {
+      font-size: 0.7rem;
+      padding: var(--space-1) var(--space-3);
+      background: var(--surface-hover);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      color: var(--text-muted);
+      margin-left: var(--space-2);
+      font-weight: 500;
+    }
+    [data-theme="light"] .latency-badge { background: #e5e5e5; color: #555; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #444; border-radius: var(--radius-md); }
+    ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+    /* ============================================================
+       CLIP LIST — مقاطع الفيديو
+       ============================================================ */
+    .clip-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-2);
+      background: var(--surface-hover);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      transition: all var(--transition-fast);
+      box-sizing: border-box;
+      min-width: 0;
+    }
+    .clip-item:hover {
+      border-color: var(--border-focus);
+      background: var(--surface-active);
+    }
+    .clip-item .clip-handle {
+      cursor: grab;
+      color: var(--text-muted);
+      font-size: 1.125rem;
+      user-select: none;
+    }
+    .clip-item .clip-handle:active { cursor: grabbing; }
+    .clip-item .clip-name {
+      flex: 1;
+      font-size: 0.85rem;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .clip-item .clip-range {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      min-width: 70px;
+      text-align: right;
+      font-family: var(--font-mono);
+    }
+    .clip-item .clip-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: var(--space-1) var(--space-2);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .clip-item .clip-btn:hover { background: var(--border); color: var(--text); }
+    .clip-item .clip-btn:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: var(--focus-offset);
+    }
+
+    #clip-list-empty {
+      padding: var(--space-4);
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      text-align: center;
+      font-style: italic;
+    }
+
+    /* ============================================================
+       COMPATIBILITY BADGE
+       ============================================================ */
+    .compat-good {
+      background: rgba(46, 204, 113, 0.15);
+      color: var(--success);
+      border: 1px solid var(--success);
+    }
+    .compat-bad {
+      background: rgba(231, 76, 60, 0.15);
+      color: var(--danger);
+      border: 1px solid var(--danger);
+    }
+
+    /* ============================================================
+       RESPONSIVE DESIGN — التصميم المتجاوب
+       ============================================================ */
+
+    /* ============================================================
+       LOADING STATES — حالات التحميل الجديدة
+       ============================================================ */
+    .loading-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: var(--radius-full);
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .skeleton {
+      background: linear-gradient(
+        90deg,
+        var(--surface) 25%,
+        var(--surface-hover) 50%,
+        var(--surface) 75%
+      );
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: var(--radius-sm);
+    }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .skeleton-text {
+      height: 14px;
+      border-radius: var(--radius-sm);
+      margin-bottom: var(--space-2);
+    }
+    .skeleton-text.short { width: 60%; }
+    .skeleton-text.long { width: 100%; }
+    .skeleton-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-full);
+    }
+
+    /* ============================================================
+       PROJECT PANEL — إعادة تصميم لوحة المشروع
+       ============================================================ */
+    #project-panel h3 {
+      margin: 0 0 var(--space-3) 0;
+      color: var(--text);
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    #project-panel > div:first-child { margin-bottom: var(--space-4); }
+
+    #project-panel label {
+      display: block;
+      margin-bottom: var(--space-1);
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    #preview-edit-controls {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+      margin-top: var(--space-2);
+    }
+    .preview-edit-actions {
+      display: flex;
+      gap: var(--space-2);
+      flex-wrap: wrap;
+    }
+    #duration-counter {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    #clip-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+      max-height: 200px;
+      overflow-y: auto;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: var(--space-2);
+      box-sizing: border-box;
+    }
+
+    #compatibility-badge {
+      margin-bottom: var(--space-4);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-md);
+      font-size: 0.8rem;
+      font-weight: 500;
+      display: none;
+      align-items: center;
+      gap: var(--space-2);
+      box-shadow: var(--shadow-sm);
+    }
+    #compatibility-badge span {
+      font-weight: normal;
+      opacity: 0.9;
+    }
+
+    /* Delete ranges section */
+    #delete-ranges-section { margin-bottom: var(--space-4); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
+    #delete-ranges-section h4 { margin: 0 0 var(--space-3) 0; font-size: 0.875rem; color: var(--text-muted); }
+    .delete-range-inputs { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-2); }
+    .delete-range-inputs label { font-size: 0.75rem; color: var(--text-muted); }
+    .delete-range-inputs input { width: 90px; padding: var(--space-1) var(--space-2); font-size: 0.8rem; }
+    #delete-ranges-list { list-style: none; margin: 0 0 var(--space-2) 0; padding: 0; }
+    #delete-ranges-list li {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: var(--space-1) var(--space-2); background: var(--surface-hover);
+      border-radius: var(--radius-sm); margin-bottom: var(--space-1); font-size: 0.8rem;
+    }
+    #delete-ranges-list .del-range-remove {
+      background: none; border: none; color: var(--danger); cursor: pointer; font-size: 1rem;
+    }
+
+    /* Merge page */
+    #merge-page { padding: var(--space-4); }
+    #merge-page header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); flex-wrap: wrap; }
+    #merge-list { display: flex; flex-direction: column; gap: var(--space-2); }
+    .merge-item {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: var(--space-2) var(--space-3); background: var(--surface);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+    }
+    .merge-item .merge-index {
+      width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+      background: var(--accent); color: #fff; border-radius: var(--radius-full); font-size: 0.8rem; flex-shrink: 0;
+    }
+    .merge-item .merge-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .merge-item .merge-btn { padding: var(--space-1) var(--space-2); font-size: 0.8rem; }
+    #merge-empty { text-align: center; padding: var(--space-8); color: var(--text-muted); }
+
+    .export-controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: var(--space-2) var(--space-4);
+      align-items: end;
+      flex-wrap: wrap;
+    }
+    .export-controls > label {
+      margin-bottom: 0;
+      white-space: nowrap;
+    }
+    .export-controls > select,
+    .export-controls > input[type=text] {
+      min-width: 140px;
+    }
+    .export-actions {
+      display: flex;
+      gap: var(--space-2);
+      align-items: end;
+    }
+
+/* ============================================================
+       RESPONSIVE DESIGN — التصميم المتجاوب
+       ============================================================ */
+    /* Below 1024px: project panel becomes a collapsible drawer, not hidden */
+    @media (max-width: 1024px) {
+      #timeline { flex-wrap: wrap; }
+      .toolbar-group { flex-wrap: wrap; }
+      #app {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr auto auto;
+      }
+      #project-panel {
+        grid-row: 3;
+        grid-column: 1;
+        max-height: 40vh;
+        border-left: none;
+        border-top: 1px solid var(--border);
+        transition: max-height var(--transition-base), opacity var(--transition-base);
+        overflow-y: auto;
+      }
+      #project-panel.collapsed {
+        max-height: 0;
+        opacity: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      .export-controls {
+        grid-template-columns: 1fr auto;
+      }
+      .export-actions {
+        width: 100%;
+        justify-content: stretch;
+      }
+      .export-actions button {
+        flex: 1;
+        white-space: normal;
+      }
+    }
+
+    @media (max-width: 640px) {
+      #timeline {
+        padding: 0 var(--space-2);
+        gap: var(--space-1);
+        flex-wrap: wrap;
+        height: auto;
+        min-height: 60px;
+        align-items: stretch;
+      }
+      #timeline .toolbar-group {
+        flex-wrap: wrap;
+        gap: var(--space-1);
+        width: 100%;
+        justify-content: center;
+      }
+      #timeline .flex-spacer {
+        min-width: 0;
+        flex: 1 1 100%;
+        order: 99;
+      }
+      .timeline-bar {
+        min-width: 120px;
+        order: 100;
+        width: 100%;
+      }
+      .row {
+        min-width: auto;
+        flex: 1 1 100%;
+        flex-wrap: wrap;
+        gap: var(--space-1);
+      }
+      .row label {
+        min-width: auto;
+        order: 1;
+        flex: 1 1 100%;
+      }
+      .row > span,
+      .row > input,
+      .row > select {
+        order: 2;
+        flex: 1 1 100%;
+        min-width: 120px;
+      }
+      #project-panel { max-height: 35vh; }
+      #project-panel.collapsed { max-height: 0; }
+      #video-surface #placeholder { padding: var(--space-4); }
+      #clip-list { max-height: 160px; padding: var(--space-1); }
+      .export-controls {
+        grid-template-columns: 1fr;
+        gap: var(--space-2);
+      }
+      .export-actions {
+        width: 100%;
+        justify-content: stretch;
+      }
+      .export-actions button {
+        flex: 1;
+        white-space: normal;
+      }
+      #keyboard-hint {
+        font-size: 0.65rem;
+        padding: 0 var(--space-2);
+      }
+    }
+
+    @media (max-width: 480px) {
+      #project-panel { max-height: 30vh; }
+      #timeline { padding: 0 var(--space-1); }
+      .timeline-bar { min-width: 100px; }
+      .clip-item {
+        gap: var(--space-1);
+        padding: var(--space-1);
+      }
+      .clip-item .clip-range {
+        min-width: 60px;
+        font-size: 0.7rem;
+      }
+      #play-icon {
+        font-size: 2.5rem;
+        width: 52px;
+        height: 52px;
+      }
+    }
+
+    /* ============================================================
+       ARABIC TYPOGRAPHY — تحسين الخط العربي
+       ============================================================ */
+    :lang(ar), [dir="rtl"] {
+      font-family: var(--font-arabic);
+    }
+    [dir="rtl"] .timeline-thumb {
+      transform: translate(50%, -50%);
+    }
+    [dir="rtl"] .timeline-thumb:hover {
+      transform: translate(50%, -50%) scale(1.15);
+    }
+    [lang="ar"] .clip-item .clip-name { text-align: right; }
+    [lang="ar"] .row label { text-align: right; }
+
+    /* ============================================================
+       UTILITIES
+       ============================================================ */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      border: 0;
+      white-space: nowrap;
+    }
+    .text-center { text-align: center; }
+    .font-mono { font-family: var(--font-mono); }
+    .font-semibold { font-weight: 600; }
+
+    /* ============================================================
+       FULLSCREEN MODE — وضع الشاشة الكاملة
+       ============================================================ */
+    #app.is-fullscreen #timeline {
+      display: none;
+    }
+
+    #app.is-fullscreen #project-panel {
+      display: none;
+    }
+
+    #app.is-fullscreen #keyboard-hint {
+      display: none;
+    }
+
+    #app.is-fullscreen #video-surface {
+      background: #000;
+      cursor: none;
+    }
+
+    /* Hide mouse cursor after inactivity in fullscreen */
+    #app.is-fullscreen.cursor-hidden #video-surface {
+      cursor: none;
+    }
+
+    /* Fullscreen button visual state */
+    #btn-fullscreen.is-active {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+
+    /* ============================================================
+       CLIP TRIM CONTROLS — أدوات قص المقاطع
+       ============================================================ */
+    .clip-trim {
+      display: flex;
+      align-items: center;
+      gap: var(--space-1);
+      margin-left: var(--space-2);
+      padding: var(--space-1);
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: var(--radius-sm);
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+    }
+
+    .clip-trim input {
+      width: 55px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: var(--radius-sm);
+      padding: 2px 4px;
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+    }
+
+    .clip-trim input:focus-visible {
+      outline: var(--focus-ring);
+      border-color: var(--border-focus);
+    }
+
+    .clip-trim label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-bottom: 0;
+      white-space: nowrap;
+    }
+
+    .clip-trim button {
+      padding: 2px 6px;
+      font-size: 0.7rem;
+      min-width: auto;
+    }
+
+    /* Drag & Drop states */
+    .clip-item.drag-over {
+      border: 2px dashed var(--accent);
+      background: rgba(74, 144, 226, 0.1);
+      transform: scale(1.02);
+      z-index: 10;
+    }
+
+    .clip-item.is-dragging {
+      opacity: 0.5;
+      border: 2px dashed var(--accent);
+      background: rgba(74, 144, 226, 0.2);
+    }
+
+    .clip-item .clip-handle {
+      cursor: grab;
+    }
+
+    .clip-item.is-dragging .clip-handle {
+      cursor: grabbing;
+    }
+
+    /* Empty drop zone */
+    #clip-list.empty-zone {
+      border: 2px dashed var(--border);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* ============================================================
+       DRAG INDICATOR
+       ============================================================ */
+    #drag-indicator {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 9999;
+      display: none;
+    }
+
+    #drag-indicator.visible {
+      display: block;
+    }
+
+    #drag-ghost {
+      position: absolute;
+      padding: var(--space-2);
+      background: var(--surface);
+      border: 2px solid var(--accent);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-lg);
+      color: var(--text);
+      font-size: 0.85rem;
+      pointer-events: none;
+      min-width: 140px;
+      text-align: center;
+    }
+    
+
+    /* ============================================================
+       SPLIT CLIP — تقسيم المقاطع
+       ============================================================ */
+    .clip-actions {
+      display: flex;
+      gap: var(--space-1);
+      align-items: center;
+    }
+
+    .clip-actions .clip-btn {
+      padding: var(--space-1) var(--space-2);
+      font-size: 0.75rem;
+      min-width: auto;
+    }
+
+    .clip-actions .btn-split {
+      background: var(--warning);
+      border-color: var(--warning);
+      color: #fff;
+    }
+
+    .clip-actions .btn-split:hover:not(:disabled) {
+      background: #e67e22;
+      border-color: #e67e22;
+    }
+
+    .clip-actions .btn-split:disabled {
+      opacity: 0.5;
+      background: var(--border);
+      border-color: var(--border);
+      color: var(--text-muted);
+    }
+
+    /* Selected clip highlight */
+    .clip-item.is-selected {
+      border: 2px solid var(--accent);
+      background: rgba(74, 144, 226, 0.15);
+    }
+
+    /* Split indicator on timeline */
+    .split-indicator {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--warning);
+      z-index: 5;
+      pointer-events: none;
+    }
+    
+  </style>
+  <script type="module" crossorigin src="/assets/index-SpDoyL6u.js"></script>
+</head>
+<body>
+  <a id="skip-to-content" href="#app">Skip to main content</a>
+
+  <div id="app" tabindex="-1">
+    <div id="video-surface" role="region" aria-label="Video player">
+      <div id="overlay">
+        <div id="play-overlay" role="button" aria-label="Play video" tabindex="0">
+          <div id="play-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+          <div id="pause-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></div>
+        </div>
+        <!-- Hover progress bar + time readout over the video -->
+        <div id="video-controls" class="hidden">
+          <div id="video-progress-bar" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+            <div id="video-progress-fill"></div>
+            <div id="video-progress-thumb"></div>
+          </div>
+          <div id="video-time">
+            <span id="video-current-time">0:00</span> / <span id="video-duration">0:00</span>
+          </div>
+        </div>
+      </div>
+      <div id="scrub-preview" aria-live="polite" aria-atomic="true">
+        <img id="scrub-preview-img" />
+      </div>
+      <div id="placeholder" dir="auto" role="status" aria-live="polite"><span data-i18n="status.idle">Idle</span>. <span data-i18n="btn.open">Open File</span>.<br><small id="wayland-hint" style="display:none" data-i18n="hint.wayland">Video renders via mpv X11 embedding. Running on Wayland may degrade performance.</small></div>
+    </div>
+    <div id="timeline" role="region" aria-label="Timeline scrubber">
+      <div class="toolbar-group">
+        <button id="btn-open" class="primary" aria-label="Open video file" data-i18n="btn.open">Open File</button>
+        <button id="btn-play-pause" disabled aria-label="Play/Pause" data-i18n="btn.play">Play/Pause</button>
+        <button id="btn-scrub-prev" disabled aria-label="Scrub previous frame" data-i18n="btn.scrubPrev">Prev Frame</button>
+        <button id="btn-scrub-next" disabled aria-label="Scrub next frame" data-i18n="btn.scrubNext">Next Frame</button>
+      </div>
+      <div class="toolbar-divider" aria-hidden="true"></div>
+<div class="timeline-bar" id="timeline-bar" role="slider" aria-label="Timeline seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+         <div id="deleted-overlay" style="position:absolute;inset:0;pointer-events:none;z-index:5;overflow:hidden;"></div>
+         <div class="timeline-progress" id="timeline-progress"></div>
+        <div class="timeline-markers" id="timeline-markers"></div>
+        <div class="timeline-thumb" id="timeline-thumb"></div>
+        <div class="split-indicator" id="split-indicator"></div>
+      </div>
+      <div class="timeline-scrub-preview" id="timeline-scrub-preview">
+        <img id="timeline-scrub-img" />
+      </div>
+      <div class="toolbar-divider" aria-hidden="true"></div>
+      <div class="row" aria-live="polite">
+        <label for="time-display" data-i18n="label.time">Time</label>
+        <span id="time-display">00:00 / 00:00</span>
+      </div>
+      <div class="latency-badge" id="latency-badge" title="Scrub latency p50/p95" aria-label="Scrub latency">— ms</div>
+      <div class="row" style="flex: 2; min-width: 140px;">
+        <label for="seek-bar" data-i18n="label.seek">Seek</label>
+        <input type="range" id="seek-bar" min="0" max="100" value="0" disabled aria-label="Timeline position" />
+      </div>
+      <div class="row">
+        <label for="speed-select" data-i18n="label.speed">Speed</label>
+        <select id="speed-select" disabled aria-label="Playback speed">
+          <option value="0.25">0.25x</option>
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="1.5">1.5x</option>
+          <option value="2">2x</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="volume-bar" data-i18n="label.volume">Volume</label>
+        <input type="range" id="volume-bar" min="0" max="1" step="0.05" value="1" aria-label="Volume" />
+        <button id="btn-mute" class="icon" aria-label="Toggle mute" data-i18n="btn.mute"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></button>
+      </div>
+      <div class="toolbar-divider" aria-hidden="true"></div>
+      <div class="toolbar-group">
+        <div class="dropdown" aria-label="Language selection">
+          <button id="btn-locale" aria-haspopup="listbox" data-i18n="btn.locale">Language</button>
+          <div id="locale-dropdown" class="dropdown-content" role="listbox">
+            <div class="dropdown-item" data-locale="en" role="option" aria-selected="true" data-i18n="locale.en">English</div>
+            <div class="dropdown-item" data-locale="ar" role="option" aria-selected="false" data-i18n="locale.ar">العربية</div>
+          </div>
+        </div>
+        <button id="btn-theme" aria-label="Toggle theme" data-i18n="btn.theme">Theme</button>
+        <button id="btn-fullscreen" disabled aria-label="Toggle fullscreen" data-i18n="btn.fullscreen">Fullscreen</button>
+        <button id="btn-diagnostics" disabled aria-label="Show diagnostics" title="Show mpv diagnostics"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      </div>
+      <div id="status" class="status" data-i18n="status.idle" aria-live="polite">Idle</div>
+    </div>
+
+    <!-- Project panel -->
+    <div id="project-panel" role="region" aria-label="Project editor" aria-expanded="true">
+      <h3 id="project-heading">Project</h3>
+      <button id="btn-toggle-panel" class="icon" aria-label="Collapse project panel" title="Collapse/expand"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+
+      <!-- Merge button -->
+      <button id="btn-show-merge" class="secondary" data-i18n="btn.merge">Merge Videos</button>
+
+      <!-- Delete ranges section -->
+      <div id="delete-ranges-section">
+        <h4 data-i18n="label.deleteRanges">Delete Ranges</h4>
+        <div class="delete-range-inputs">
+          <label>From:</label>
+          <input id="del-from" type="text" placeholder="00:00:00.000" />
+          <label>To:</label>
+          <input id="del-to" type="text" placeholder="00:00:00.000" />
+          <button id="btn-add-delete-range" data-i18n="btn.addDeleteRange">Add</button>
+        </div>
+<ul id="delete-ranges-list" role="list"></ul>
+         <!-- Preview edit controls -->
+         <div id="preview-edit-controls">
+           <div id="duration-counter">Original 0:00 ← Output 0:00</div>
+           <div class="preview-edit-actions">
+             <button id="btn-preview-edit" class="secondary" title="Toggle edited/original preview (P)" data-i18n="btn.previewEdit">Preview: Edited</button>
+             <button id="btn-preview-around-cut" class="secondary" title="Play 3s before and after each cut" data-i18n="btn.previewAroundCut">Around Cut</button>
+           </div>
+         </div>
+         <button id="btn-export-deleted" class="primary" data-i18n="btn.exportDeleted">Export Without Deleted</button>
+      </div>
+
+      <!-- Clip list -->
+      <div>
+        <label for="clip-list" data-i18n="label.clips">Clips</label>
+        <div id="clip-list" role="list" aria-label="Clip list">
+          <!-- Clip items inserted here by JS -->
+        </div>
+        <div id="clip-list-empty" role="status" aria-live="polite">No clips added yet.</div>
+      </div>
+
+      <!-- Compatibility badge -->
+      <div id="compatibility-badge" role="status" aria-live="polite">
+        <span id="compat-badge-text" class="font-semibold"></span>
+        <span id="compat-badge-reason"></span>
+      </div>
+
+      <!-- Export controls -->
+      <div class="export-controls">
+        <label for="export-encoder" data-i18n="label.encoder">Encoder</label>
+        <select id="export-encoder" aria-label="Export encoder">
+          <option value="copy">Copy (lossless stream copy)</option>
+          <option value="x264">x264 (H.264)</option>
+          <option value="x265">x265 (H.265/HEVC)</option>
+          <option value="svtav1">SVT-AV1</option>
+          <option value="vaapi">VAAPI</option>
+          <option value="nvenc">NVENC</option>
+        </select>
+
+        <label for="export-preset" data-i18n="label.preset">Preset</label>
+        <select id="export-preset" aria-label="Export quality preset">
+          <option value="fast">Fast</option>
+          <option value="medium">Medium</option>
+          <option value="slow">Slow</option>
+        </select>
+
+        <label for="export-dest" data-i18n="label.destination">Destination</label>
+        <input id="export-dest" type="text" value="output.mp4" />
+
+        <div class="export-actions">
+          <button id="btn-export" class="primary" data-i18n="btn.export">Export</button>
+          <progress id="export-progress" value="0" max="100" style="display:none; width:100%; height:8px; margin:0 var(--space-2);"></progress>
+          <button id="export-cancel-btn" style="display:none; align-self:center;">Cancel Export</button>
+        </div>
+        <button id="btn-save-project" data-i18n="btn.saveProject">Save Project</button>
+        <button id="btn-load-project" data-i18n="btn.loadProject">Load Project</button>
+      </div>
+    </div>
+
+    <div id="keyboard-hint" role="status" aria-live="polite" data-i18n="hint.keys">Space: play/pause • ←/→: step • ↑/↓: volume • J/K/L: transport • O: open</div>
+    <div id="toast" role="alert" aria-live="assertive"></div>
+
+    <!-- Drag & Drop indicator -->
+    <div id="drag-indicator" role="region" aria-label="Drag and drop reordering">
+      <div id="drag-ghost"></div>
+    </div>
+
+    <!-- Export progress / cancellation helpers are now inline above -->
+  </div>
+
+  <!-- Merge page -->
+  <div id="merge-page" style="display:none; height:100%; overflow-y:auto; padding:var(--space-4);">
+    <header>
+      <button id="btn-back-merge" data-i18n="btn.back">Back</button>
+      <h1 data-i18n="label.mergeTitle">Merge Videos</h1>
+      <button id="btn-merge-add" class="primary" data-i18n="btn.mergeAdd">Add Videos</button>
+      <button id="btn-merge-export" class="success" data-i18n="btn.mergeExport">Merge & Export</button>
+    </header>
+    <div id="merge-list" role="list" aria-label="Merge list">
+      <!-- Merge items inserted here by JS -->
+    </div>
+    <div id="merge-empty" role="status" aria-live="polite" data-i18n="label.mergeEmpty">No videos added. Click "Add Videos" to select files.</div>
+  </div>
+
+
+
+</body>
+</html>

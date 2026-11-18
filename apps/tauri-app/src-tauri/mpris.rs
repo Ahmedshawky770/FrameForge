@@ -727,7 +727,6 @@ fn metadata_to_owned_value(metadata: &MprisMetadata) -> OwnedVariant {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zbus::interface;
 
     #[zbus::interface(name = "org.test.Test")]
     impl TestInterface {

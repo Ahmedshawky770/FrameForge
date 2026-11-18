@@ -236,9 +236,10 @@ pub async fn project_compatibility(clip_paths: Vec<String>) -> Result<Compatibil
 
     // Add items to track
     for (i, path) in clip_paths.iter().enumerate() {
+        let unique_id = (i as u64) + 1;
         tracks[0].items.push(frameforge_core_types::TimelineItem {
-            id: frameforge_core_types::ItemId(i as u64),
-            source_id: frameforge_core_types::SourceId(i as u64),
+            id: frameforge_core_types::ItemId(unique_id),
+            source_id: frameforge_core_types::SourceId(unique_id),
             name: std::path::Path::new(path)
                 .file_name()
                 .unwrap_or_default()
@@ -313,12 +314,20 @@ pub async fn project_export(
 
     let dest = PathBuf::from(&output_path);
 
-    // 3. Disk-space precheck: refuse to start if free space is below threshold.
+    // 3. Disk-space precheck: estimate required free space from the input/output
+    // size (sum of source clip sizes) instead of a fixed 10 MiB threshold.
+    let estimated_bytes: u64 = edl
+        .clips
+        .iter()
+        .filter_map(|c| std::fs::metadata(&c.path).ok())
+        .map(|m| m.len())
+        .sum();
+    let required_bytes = estimated_bytes.max(MIN_FREE_BYTES);
     let free_bytes = disk_space_free(&dest).map_err(|e| format!("disk space check failed: {e}"))?;
-    if free_bytes < MIN_FREE_BYTES {
+    if free_bytes < required_bytes {
         return Err(format!(
-            "insufficient disk space: {} bytes free (need at least {MIN_FREE_BYTES})",
-            free_bytes
+            "insufficient disk space: {} bytes free (need at least {})",
+            free_bytes, required_bytes
         ));
     }
 
@@ -344,15 +353,38 @@ pub async fn project_export(
 
     // 6. Run the blocking ffmpeg pipeline on the blocking thread pool.
     tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Extract normalization targets from the EDL before moving clips.
+        let (
+            target_width,
+            target_height,
+            target_fps_num,
+            target_fps_den,
+            target_audio_rate,
+            target_audio_channels,
+        ) = (
+            edl.export.width,
+            edl.export.height,
+            edl.export.fps_num,
+            edl.export.fps_den,
+            edl.export.audio_sample_rate,
+            edl.export.audio_channels,
+        );
+
         let mut executor: Box<dyn ExportExecutor + Send> = if plan.merge_plan.lossless {
             Box::new(StreamCopyExecutor::new(edl.clips, dest.clone()))
         } else {
-            Box::new(ReencodeExecutor::new(
-                edl.clips,
-                dest.clone(),
-                encoder_pref,
-                quality_preset,
-            ))
+            Box::new(
+                ReencodeExecutor::new(edl.clips, dest.clone(), encoder_pref, quality_preset)
+                    .with_normalization(
+                        target_width,
+                        target_height,
+                        target_fps_num,
+                        target_fps_den,
+                        None,
+                        target_audio_rate,
+                        target_audio_channels,
+                    ),
+            )
         };
 
         let progress = move |p: f32| {
