@@ -3,9 +3,10 @@ use frameforge_core_types::{
     Clip, Container, Edl, ExportMode, ExportSettings, ItemId, Segment, SourceId, TimeRange,
     Timebase, TimelineItem, Timestamp, Track, TrackKind,
 };
-use frameforge_edit_engine::{analyze_compatibility, plan_export, validate_edl};
+use frameforge_edit_engine::{plan_export, validate_edl};
 use frameforge_export_engine::{
-    disk_space_free, ExportExecutor, ReencodeExecutor, StreamCopyExecutor,
+    disk_space_free, output_format_from_extension, ExportExecutor, ReencodeExecutor,
+    StreamCopyExecutor,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::from_str;
@@ -221,56 +222,15 @@ fn seconds_to_timestamp(seconds: f64) -> Timestamp {
 
 #[command]
 pub async fn project_compatibility(clip_paths: Vec<String>) -> Result<CompatibilityInfo, String> {
-    // Build tracks from clips for compatibility check
-    let mut tracks = vec![frameforge_core_types::Track {
-        kind: frameforge_core_types::TrackKind::Video,
-        enabled: true,
-        index: Some(0),
-        name: "Video".into(),
-        height: 80.0,
-        muted: false,
-        solo: false,
-        locked: false,
-        items: Vec::new(),
-    }];
+    // Probe each clip directly (no fabricated 1s durations or placeholder
+    // timeline items): analyze_compatibility_paths probes every file once and
+    // compares the real video-stream parameters (codec/profile/resolution/fps/
+    // timebase/pix_fmt/audio). Missing files or files without a video stream
+    // surface as an error naming the offending path.
+    let paths: Vec<PathBuf> = clip_paths.into_iter().map(PathBuf::from).collect();
 
-    // Add items to track
-    for (i, path) in clip_paths.iter().enumerate() {
-        let unique_id = (i as u64) + 1;
-        tracks[0].items.push(frameforge_core_types::TimelineItem {
-            id: frameforge_core_types::ItemId(unique_id),
-            source_id: frameforge_core_types::SourceId(unique_id),
-            name: std::path::Path::new(path)
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-            path: PathBuf::from(path),
-            source_range: frameforge_core_types::TimeRange::new(
-                frameforge_core_types::Timestamp::new(
-                    0,
-                    frameforge_core_types::Timebase::new(1, 1_000_000),
-                ),
-                frameforge_core_types::Timestamp::new(
-                    1_000_000,
-                    frameforge_core_types::Timebase::new(1, 1_000_000),
-                ),
-            ),
-            timeline_start: frameforge_core_types::Timestamp::new(
-                0,
-                frameforge_core_types::Timebase::new(1, 1_000_000),
-            ),
-            track_index: 0,
-            transition_in: None,
-            transition_out: None,
-            volume: 1.0,
-            opacity: 1.0,
-            enabled: true,
-            locked: false,
-        });
-    }
-
-    let report = analyze_compatibility(&tracks).map_err(|e| e.to_string())?;
+    let report =
+        frameforge_edit_engine::analyze_compatibility_paths(&paths).map_err(|e| e.to_string())?;
 
     Ok(CompatibilityInfo {
         lossless_possible: report.lossless_possible,
@@ -312,7 +272,13 @@ pub async fn project_export(
     // 2. Validate the EDL (non-overlapping segments, monotonic times).
     validate_edl(&edl).map_err(|e| e.to_string())?;
 
-    let dest = PathBuf::from(&output_path);
+    let mut dest = PathBuf::from(&output_path);
+    // Ensure the destination has a recognized video extension so ffmpeg can
+    // select a muxer; fall back to mp4 when the user typed an unknown/missing
+    // extension instead of failing mid-export (which leaves a stray temp file).
+    if output_format_from_extension(&dest).is_none() {
+        dest = dest.with_extension("mp4");
+    }
 
     // 3. Disk-space precheck: estimate required free space from the input/output
     // size (sum of source clip sizes) instead of a fixed 10 MiB threshold.
@@ -431,7 +397,19 @@ pub async fn save_file_dialog() -> Result<Option<String>, String> {
         .set_file_name("output.mp4")
         .save_file()
         .await;
-    Ok(file.map(|f| f.path().to_string_lossy().to_string()))
+    Ok(file.map(|f| {
+        let mut p = f.path().to_string_lossy().to_string();
+        let path = std::path::Path::new(&p);
+        let has_ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| !e.is_empty())
+            .unwrap_or(false);
+        if !has_ext {
+            p.push_str(".mp4");
+        }
+        p
+    }))
 }
 
 /// Open a save file dialog for choosing the project save location.

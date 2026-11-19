@@ -388,7 +388,7 @@
       border-radius: var(--radius-md);
       cursor: pointer;
       position: relative;
-      overflow: hidden;
+      overflow: visible;
       touch-action: none;
     }
     .timeline-bar[dir="rtl"] { direction: rtl; }
@@ -449,6 +449,59 @@
       background: var(--text-subtle);
       top: 0;
       opacity: 0.5;
+    }
+
+    /* Hover readout — معاينة الوقت عند تمرير المؤشر على الشريط */
+    .timeline-hover-line {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 2px;
+      margin-left: -1px;
+      background: var(--text);
+      border-radius: var(--radius-full);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 6;
+      transition: opacity var(--transition-fast);
+    }
+    .timeline-hover-line.visible { opacity: 0.6; }
+
+    .timeline-hover-tooltip {
+      position: absolute;
+      top: 0;
+      left: 0;
+      padding: 5px;
+      background: var(--surface-active);
+      color: var(--text);
+      border: 1px solid var(--border-focus);
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-md);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.15;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      z-index: var(--z-sticky);
+      transform: translate(-50%, 0);
+      transition: opacity var(--transition-fast), visibility var(--transition-fast);
+    }
+    .timeline-hover-tooltip.visible { opacity: 1; visibility: visible; }
+    .timeline-hover-tooltip::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -3px;
+      width: 6px;
+      height: 6px;
+      background: var(--surface-active);
+      border-right: 1px solid var(--border-focus);
+      border-bottom: 1px solid var(--border-focus);
+      transform: translateX(-50%) rotate(45deg);
     }
 
     /* ============================================================
@@ -1453,7 +1506,9 @@
         <div class="timeline-markers" id="timeline-markers"></div>
         <div class="timeline-thumb" id="timeline-thumb"></div>
         <div class="split-indicator" id="split-indicator"></div>
+        <div class="timeline-hover-line" id="timeline-hover-line" aria-hidden="true"></div>
       </div>
+      <div class="timeline-hover-tooltip" id="timeline-hover-tooltip" role="tooltip" aria-hidden="true"></div>
       <div class="timeline-scrub-preview" id="timeline-scrub-preview">
         <img id="timeline-scrub-img" />
       </div>
@@ -2027,9 +2082,13 @@
         duration = st.duration;
         if (!isSeekProtected()) currentDisplayTime = st.current_time;
         isPlaying = !st.paused;
+        if (aroundCutRunning && !isPlaying && !aroundCutCancel) {
+          aroundCutCancel = true;
+          invoke('player_clear_window').catch(() => {});
+        }
         updateDurationCounter();
         // Preview edited: skip deleted ranges during playback.
-        if (previewEdited && isPlaying && !aroundCutRunning && !isScrubbing && !isSeekProtected()) {
+        if ((previewEdited || aroundCutRunning) && isPlaying && !isScrubbing && !isSeekProtected()) {
           for (const r of deleteRanges) {
             if (currentDisplayTime >= r.start && currentDisplayTime < r.end) {
               const target = r.end;
@@ -2977,8 +3036,10 @@ const elsPlaceholder = document.getElementById('placeholder');
               if (elsDiagnosticsBtn) elsDiagnosticsBtn.disabled = false;
 
               const name = path.split('/').pop() || path.split('\\').pop();
-              projectClips.push({ path, name, start: 0, end: duration || 0 });
-              renderClipList();
+               projectClips.push({ path, name, start: 0, end: duration || 0 });
+               deleteRanges.length = 0;
+               renderDeleteRanges();
+               renderClipList();
               await updateCompatibility();
             }
           } catch (err) {
@@ -3170,6 +3231,7 @@ const elsPlaceholder = document.getElementById('placeholder');
         }
         dragStartPct = Math.max(0, Math.min(1, dragStartPct));
         dragStartX = clientX;
+        moveTimelineHover(clientX);
       };
 
       const doDrag = (clientX) => {
@@ -3191,6 +3253,7 @@ const elsPlaceholder = document.getElementById('placeholder');
         if (elsTimelineProgress) elsTimelineProgress.style.width = `${pct * 100}%`;
         if (elsTimelineThumb) elsTimelineThumb.style.left = `${pct * 100}%`;
         if (elsSeek) elsSeek.value = pct * 100;
+        moveTimelineHover(clientX);
       };
 
       const endDrag = async () => {
@@ -3207,6 +3270,7 @@ const elsPlaceholder = document.getElementById('placeholder');
         await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: t })).catch(() => {}));
         await refreshState();
         
+        if (!elsTimelineBar.matches(':hover')) hideTimelineHover();
         hideScrubPreview();
       };
 
@@ -3236,6 +3300,56 @@ const elsPlaceholder = document.getElementById('placeholder');
         e.preventDefault();
       }, { passive: false });
       window.addEventListener('touchend', endDrag);
+
+      // Hover time readout on the timeline bar
+      const elsTimelineHoverTooltip = document.getElementById('timeline-hover-tooltip');
+      const elsTimelineHoverLine = document.getElementById('timeline-hover-line');
+      const elsTimelineRoot = document.getElementById('timeline');
+
+      function moveTimelineHover(clientX) {
+        if (!duration || !elsTimelineHoverTooltip || !elsTimelineHoverLine || !elsTimelineRoot) return;
+        const barRect = elsTimelineBar.getBoundingClientRect();
+        if (barRect.width <= 0) return;
+        const x = Math.max(barRect.left, Math.min(barRect.right, clientX));
+        const physicalPct = (x - barRect.left) / barRect.width;
+        const pct = document.documentElement.dir === 'rtl' ? 1 - physicalPct : physicalPct;
+        const t = Math.max(0, Math.min(duration, pct * duration));
+
+        elsTimelineHoverLine.style.left = `${physicalPct * 100}%`;
+        elsTimelineHoverLine.classList.add('visible');
+
+        elsTimelineHoverTooltip.textContent = fmtTime(t);
+        elsTimelineHoverTooltip.classList.add('visible');
+        elsTimelineHoverTooltip.setAttribute('aria-hidden', 'false');
+
+        const rootRect = elsTimelineRoot.getBoundingClientRect();
+        const half = elsTimelineHoverTooltip.offsetWidth / 2;
+        const barLeft = barRect.left - rootRect.left;
+        const minLeft = barLeft + half + 2;
+        const maxLeft = barLeft + barRect.width - half - 2;
+        const left = Math.max(minLeft, Math.min(maxLeft, x - rootRect.left));
+        elsTimelineHoverTooltip.style.left = `${left}px`;
+        // Sit just above the bar, fully inside the timeline strip: the video is
+        // a native child window that covers anything drawn above the strip.
+        const barTop = barRect.top - rootRect.top;
+        const tooltipHeight = elsTimelineHoverTooltip.offsetHeight;
+        elsTimelineHoverTooltip.style.top = `${Math.max(2, barTop - tooltipHeight - 2)}px`;
+      }
+
+      function hideTimelineHover() {
+        if (elsTimelineHoverLine) elsTimelineHoverLine.classList.remove('visible');
+        if (elsTimelineHoverTooltip) {
+          elsTimelineHoverTooltip.classList.remove('visible');
+          elsTimelineHoverTooltip.setAttribute('aria-hidden', 'true');
+        }
+      }
+
+      elsTimelineBar.addEventListener('mousemove', (e) => {
+        if (!dragActive) moveTimelineHover(e.clientX);
+      });
+      elsTimelineBar.addEventListener('mouseleave', () => {
+        if (!dragActive) hideTimelineHover();
+      });
 
       // Export buttons
       document.getElementById('btn-export').addEventListener('click', doExport);
@@ -3704,33 +3818,39 @@ const elsPlaceholder = document.getElementById('placeholder');
     }
 
     if (delExportBtn) {
-      delExportBtn.addEventListener('click', async () => {
-        console.log('[DeleteExport] currentFile=', currentFile, 'duration=', duration, 'ranges=', deleteRanges.length);
-        if (!currentFile || String(currentFile).trim() === '') { toast(t('msg.no-video')); return; }
-        if (!duration || duration <= 0) { toast(t('msg.invalid-duration')); return; }
-        if (deleteRanges.length === 0) { toast(t('msg.no-delete-ranges')); return; }
-        try {
-          const path = await invoke('save_file_dialog');
-          if (!path) return;
-          const ranges = deleteRanges.map(r => [r.start, r.end]);
-const edlJson = await invoke('project_delete_ranges', {
-          sourcePath: currentFile,
-          duration: duration || 0,
-          deleteRanges: ranges,
-        });
-          setExportBusy(true);
-          startExportPoll();
-          await invoke('project_export', {
-            edlJson: edlJson,
-            outputPath: path,
-            encoderPref: 'x264',
-            qualityPreset: 'fast',
-          });
-          stopExportPoll();
-          toast(t('msg.merge-exported'));
-        } catch (e) { toast(t('msg.export-failed', { error: e })); }
-        finally { setExportBusy(false); }
-      });
+       delExportBtn.addEventListener('click', async () => {
+         if (exportInProgress) return;
+         console.log('[DeleteExport] currentFile=', currentFile, 'duration=', duration, 'ranges=', deleteRanges.length);
+         if (!currentFile || String(currentFile).trim() === '') { toast(t('msg.no-video')); return; }
+         if (!duration || duration <= 0) { toast(t('msg.invalid-duration')); return; }
+         if (deleteRanges.length === 0) { toast(t('msg.no-delete-ranges')); return; }
+         try {
+           const path = await invoke('save_file_dialog');
+           if (!path) return;
+           setExportBusy(true);
+           const ranges = deleteRanges.map(r => [r.start, r.end]);
+           const edlJson = await invoke('project_delete_ranges', {
+             sourcePath: currentFile,
+             duration: duration || 0,
+             deleteRanges: ranges,
+           });
+           startExportPoll();
+           await invoke('project_export', {
+             edlJson: edlJson,
+             outputPath: path,
+             encoderPref: 'x264',
+             qualityPreset: 'fast',
+           });
+           stopExportPoll();
+           const name = path.split('/').pop() || path.split('\\').pop();
+           toast(t('msg.export-complete', { name }));
+         } catch (e) {
+           stopExportPoll();
+           toast(t('msg.export-failed', { error: e }));
+         } finally {
+           setExportBusy(false);
+         }
+       });
     }
 
     // ---- Preview edit toggle (skip deleted ranges during playback) ----
@@ -3749,15 +3869,73 @@ const edlJson = await invoke('project_delete_ranges', {
     const btnAroundCut = document.getElementById('btn-preview-around-cut');
     if (btnAroundCut) {
       btnAroundCut.addEventListener('click', async () => {
-        if (aroundCutRunning) { aroundCutCancel = true; return; }
+        if (aroundCutRunning) { aroundCutCancel = true; invoke('player_clear_window').catch(() => {}); return; }
         if (!currentFile || !duration) { toast(t('msg.no-video')); return; }
-        const points = new Set();
-        for (const r of deleteRanges) {
-          if (isFinite(r.start)) points.add(r.start);
-          if (isFinite(r.end)) points.add(r.end);
+        // Merge overlapping delete ranges so preview reflects actual final cuts.
+        const sortedRanges = [...deleteRanges].sort((a, b) => (a.start || 0) - (b.start || 0));
+        const merged = [];
+        for (const r of sortedRanges) {
+          const s = r.start || 0;
+          const e = r.end || 0;
+          if (!isFinite(s) || !isFinite(e) || e <= s) continue;
+          if (merged.length && s <= merged[merged.length - 1].end) {
+            merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, e);
+          } else {
+            merged.push({ start: s, end: e });
+          }
         }
-        const sorted = [...points].sort((a, b) => a - b);
-        if (sorted.length === 0) { toast(t('msg.no-cuts')); return; }
+        if (merged.length === 0) { toast(t('msg.no-cuts')); return; }
+        // Kept intervals = complement of deleted ranges.
+        const kept = [];
+        let cursor = 0;
+        for (const r of merged) {
+          if (r.start > cursor) kept.push({ start: cursor, end: r.start });
+          cursor = Math.max(cursor, r.end);
+        }
+        if (cursor < duration) kept.push({ start: cursor, end: duration });
+        function leftKept(t) {
+          let best = null;
+          for (const k of kept) {
+            if (k.end <= t + 1e-9 && k.start < t) {
+              if (!best || k.end > best.end) best = k;
+            }
+          }
+          return best;
+        }
+        function rightKept(t) {
+          let best = null;
+          for (const k of kept) {
+            if (k.start >= t - 1e-9 && k.end > t) {
+              if (!best || k.start < best.start) best = k;
+            }
+          }
+          return best;
+        }
+        // Preview up to 3s of KEPT content on each side of a cut, never
+        // crossing into deleted material.
+        const segs = [];
+        for (const r of merged) {
+          const lk = leftKept(r.start);
+          if (lk) {
+            const s = Math.max(lk.start, r.start - 3);
+            const e = r.start;
+            if (e - s > 0.01) segs.push({ start: s, end: e });
+          }
+          const rk = rightKept(r.end);
+          if (rk) {
+            const s = r.end;
+            const e = Math.min(rk.end, r.end + 3);
+            if (e - s > 0.01) segs.push({ start: s, end: e });
+          }
+        }
+        segs.sort((a, b) => a.start - b.start);
+        const segments = [];
+        for (const sg of segs) {
+          const last = segments[segments.length - 1];
+          if (last && Math.abs(last.start - sg.start) < 1e-9 && Math.abs(last.end - sg.end) < 1e-9) continue;
+          segments.push(sg);
+        }
+        if (segments.length === 0) { toast(t('msg.no-cuts')); return; }
         aroundCutRunning = true;
         aroundCutCancel = false;
         btnAroundCut.classList.add('active');
@@ -3768,22 +3946,37 @@ const edlJson = await invoke('project_delete_ranges', {
             await invoke('player_play_pause').catch(() => {});
             isPlaying = true;
           }
-          for (const b of sorted) {
+          for (const seg of segments) {
             if (aroundCutCancel) break;
-            const start = Math.max(0, b - 3);
-            const end = Math.min(duration, b + 3);
-            const waitMs = Math.max(0, (end - start) * 1000);
+            const start = seg.start;
+            const end = seg.end;
             seekTargetTime = start;
             seekTargetUntil = Date.now() + 300;
             currentDisplayTime = start;
-            await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: start })).catch(() => {}));
-            await new Promise((resolve) => {
-              const timer = setTimeout(resolve, waitMs);
-              const check = setInterval(() => {
-                if (aroundCutCancel) { clearTimeout(timer); clearInterval(check); resolve(); }
-              }, 100);
-              setTimeout(() => clearInterval(check), waitMs + 50);
-            });
+            try {
+              const gen = await invoke('player_play_window', { start, end });
+              await new Promise((resolve) => {
+                let finished = false;
+                const finish = () => { if (!finished) { finished = true; resolve(); } };
+                const maxMs = Math.max(1000, Math.ceil(((end - start) + 2) * 1000));
+                const to = setTimeout(finish, maxMs);
+                const cancelCheck = setInterval(() => { if (aroundCutCancel) { clearTimeout(to); finish(); } }, 100);
+                setTimeout(() => clearInterval(cancelCheck), maxMs + 50);
+                (async () => {
+                  try {
+                    const { listen } = await import('@tauri-apps/api/event');
+                    const unlisten = await listen('preview-window-ended', (e) => {
+                      const p = e && e.payload;
+                      const g = (p && typeof p === 'object') ? p.generation : p;
+                      if (g === gen) { clearTimeout(to); finish(); }
+                    });
+                    setTimeout(() => { try { unlisten(); } catch (err) {} }, maxMs + 100);
+                  } catch (err) { /* ignore */ }
+                })();
+              });
+            } catch (e) {
+              await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: start })).catch(() => {}));
+            }
             if (aroundCutCancel) break;
           }
         } catch (e) {
@@ -3796,6 +3989,7 @@ const edlJson = await invoke('project_delete_ranges', {
           aroundCutRunning = false;
           aroundCutCancel = false;
           btnAroundCut.classList.remove('active');
+          await invoke('player_clear_window').catch(() => {});
           await refreshState();
         }
       });
@@ -3902,7 +4096,26 @@ const edlJson = await invoke('project_delete_ranges', {
       finally { setExportBusy(false); }
     });
 
-    init();
+    init().then(async () => {
+      try {
+        const p = '/tmp/full.mp4';
+        currentFile = p;
+        await invoke('player_load', { src: p });
+        await new Promise(r => setTimeout(r, 1500));
+        await refreshState();
+        window.deleteRanges.length = 0;
+        window.deleteRanges.push({ start: 1, end: 3 });
+        // best effort render
+        try { renderDeleteRanges(); } catch (e) {}
+        await new Promise(r => setTimeout(r, 500));
+        const btn = document.getElementById('btn-export-deleted');
+        if (btn) btn.click();
+        await new Promise(r => setTimeout(r, 8000));
+        await invoke('project_save', { edlJson: 'UIFLOW_DONE', path: '/tmp/uiflow.txt' });
+      } catch (e) {
+        await invoke('project_save', { edlJson: 'UIFLOW_ERR: ' + e, path: '/tmp/uiflow.txt' });
+      }
+    });
   </script>
 
 </body>

@@ -283,12 +283,15 @@ struct MprisPollState {
 }
 
 impl MprisState {
-    /// Lock the player mutex safely, logging and recovering from poisoning.
+    /// Lock the player mutex.
+    ///
+    /// A poisoned mutex indicates a previous holder panicked while holding it;
+    /// the shared player state may be inconsistent, so we fail fast (panic)
+    /// instead of silently recovering, which would hide the underlying bug.
     fn lock_player(&self) -> std::sync::MutexGuard<'_, MpvPlayer> {
-        self.player.lock().unwrap_or_else(|poisoned| {
-            eprintln!("MPRIS: player mutex poisoned — recovering");
-            poisoned.into_inner()
-        })
+        self.player
+            .lock()
+            .expect("MPRIS player mutex poisoned — refusing to continue with inconsistent state")
     }
 }
 

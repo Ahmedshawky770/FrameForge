@@ -51,6 +51,8 @@ fn main() {
             player::player_set_fullscreen,
             player::player_play_pause,
             player::player_seek,
+            player::player_play_window,
+            player::player_clear_window,
             player::player_set_speed,
             player::player_set_volume,
             player::player_set_muted,

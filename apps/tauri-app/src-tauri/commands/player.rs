@@ -221,3 +221,22 @@ pub async fn player_resize_child_window(
     Ok(())
 }
 use std::sync::Arc;
+
+#[command]
+pub async fn player_play_window(
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
+    start: f64,
+    end: f64,
+) -> Result<u64, String> {
+    let mut p = handle.lock().map_err(|e| e.to_string())?;
+    p.play_window(start, end).map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn player_clear_window(
+    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
+) -> Result<(), String> {
+    let mut p = handle.lock().map_err(|e| e.to_string())?;
+    p.clear_window();
+    Ok(())
+}

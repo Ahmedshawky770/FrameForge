@@ -1,6 +1,7 @@
 #![allow(deprecated)]
 use crate::mpris::MprisServer;
 use crate::state::{WaylandState, WindowXidState};
+use frameforge_mpv_adapter::MpvPlayer;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{LogicalSize, Manager, WebviewWindow};
@@ -185,7 +186,9 @@ pub async fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         if !is_wayland {
             if let Some(xid) = extract_xid(&window) {
                 let xid_state = app.state::<Mutex<WindowXidState>>();
-                let mut guard = xid_state.lock().unwrap_or_else(|e| e.into_inner());
+                // Fail fast on a poisoned mutex: silent recovery would mask a prior
+                // panic and could leave the shared XID state inconsistent.
+                let mut guard = xid_state.lock().expect("WindowXidState mutex poisoned");
                 guard.set_xid(xid);
                 println!("Set mpv wid (XID): {}", xid);
 
@@ -228,5 +231,11 @@ pub async fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Provide app handle to mpv adapter for event emission
+    if let Some(player) = app.try_state::<std::sync::Arc<std::sync::Mutex<MpvPlayer>>>() {
+        if let Ok(mut p) = player.lock() {
+            p.set_app_handle(app.handle().clone());
+        }
+    }
     Ok(())
 }
