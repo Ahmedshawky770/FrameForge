@@ -76,8 +76,8 @@
 
       /* --- Timeline --- */
       --timeline-height: 52px;
-      --timeline-bar-height: 6px;
-      --timeline-thumb-size: 20px;
+      --timeline-bar-height: 4px;
+      --timeline-thumb-size: 14px;
 
       /* --- Typography --- */
       --font-body: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
@@ -445,7 +445,7 @@
     .timeline-marker {
       position: absolute;
       width: 1px;
-      height: 6px;
+      height: 4px;
       background: var(--text-subtle);
       top: 0;
       opacity: 0.5;
@@ -1179,6 +1179,51 @@
     [lang="ar"] .clip-item .clip-name { text-align: right; }
     [lang="ar"] .row label { text-align: right; }
 
+    /* Compact timeline density: buttons/icons scaled to the slimmer seek bar. */
+    @media (min-width: 1025px) {
+      #timeline { gap: var(--space-1); min-height: 46px; }
+      #timeline > .toolbar-group,
+      #timeline > .toolbar-divider { flex-shrink: 0; }
+      #timeline .toolbar-group { flex-wrap: nowrap; }
+      #timeline button {
+        display: inline-flex;
+        align-items: center;
+        height: 24px;
+        padding: 0 var(--space-2);
+        font-size: 11px;
+      }
+      #timeline button.icon {
+        width: 24px;
+        min-width: 24px;
+        padding: 0;
+        aspect-ratio: auto;
+      }
+      #timeline button.icon svg { width: 14px; height: 14px; }
+      #timeline select { height: 24px; padding: 0 var(--space-1); font-size: 11px; }
+      #timeline .toolbar-divider { height: 16px; }
+      #timeline .row { min-width: 0; }
+      #timeline .row > label { white-space: nowrap; }
+      #timeline input[type="range"] {
+        flex: 1 1 40px;
+        width: auto;
+        min-width: 40px;
+      }
+      #timeline .status {
+        flex: 0 1 auto;
+        min-width: 0;
+        margin-left: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
+    /* Wide screens: keep the whole timeline on one row instead of wrapping the
+       language/theme group (or the mute button) onto a second line. */
+    @media (min-width: 1360px) {
+      #timeline { flex-wrap: nowrap; }
+      #timeline .row { flex: 0 1 auto; }
+      #timeline .timeline-bar { flex: 2 1 120px; }
+    }
+
     /* ============================================================
        UTILITIES
        ============================================================ */
@@ -1518,10 +1563,6 @@
         <span id="time-display" title="Double-click to edit time">00:00 / 00:00</span>
       </div>
       <div class="latency-badge" id="latency-badge" title="Scrub latency p50/p95" aria-label="Scrub latency">— ms</div>
-      <div class="row" style="flex: 2; min-width: 140px;">
-        <label for="seek-bar" data-i18n="label.seek">Seek</label>
-        <input type="range" id="seek-bar" min="0" max="100" value="0" disabled aria-label="Timeline position" />
-      </div>
       <div class="row">
         <label for="speed-select" data-i18n="label.speed">Speed</label>
         <select id="speed-select" disabled aria-label="Playback speed">
@@ -1761,7 +1802,6 @@
         'locale.en': 'English',
         'locale.ar': 'العربية',
         'label.time': 'Time',
-        'label.seek': 'Seek',
         'label.speed': 'Speed',
         'label.volume': 'Volume',
         'label.encoder': 'Encoder',
@@ -1865,7 +1905,6 @@
         'locale.en': 'English',
         'locale.ar': 'العربية',
         'label.time': 'الوقت',
-        'label.seek': 'تقدم',
         'label.speed': 'السرعة',
         'label.volume': 'الصوت',
         'label.encoder': 'المُرمِّز',
@@ -2117,11 +2156,6 @@
           if (elsProgressThumb) elsProgressThumb.style.left = pct + '%';
           updateTimeline();
         }
-        const elsSeek = document.getElementById('seek-bar');
-        if (!isSeekProtected() && duration > 0 && elsSeek) {
-          elsSeek.value = (st.current_time / duration) * 100;
-        }
-        if (elsSeek) elsSeek.max = 100;
         const elsPlayOverlay = document.getElementById('play-overlay');
         if (elsPlayOverlay) {
           elsPlayOverlay.classList.toggle('hidden', isPlaying);
@@ -2883,12 +2917,16 @@
       function openLocaleDropdown(focusIndex = 0) {
         if (elsLocaleDropdown.classList.contains('show')) return;
         elsLocaleDropdown.classList.add('show');
+        // The video is a native X11 child window painted above the WebView:
+        // hide it so the menu is not drawn behind the video.
+        invoke('player_set_child_window_visible', { visible: false }).catch(() => {});
         placeDropdown(elsLocaleBtn, elsLocaleDropdown);
         const idx = Math.max(0, Math.min(focusIndex, localeItems.length - 1));
         requestAnimationFrame(() => localeItems[idx]?.focus());
       }
       function closeLocaleDropdown(returnFocus = true) {
         elsLocaleDropdown.classList.remove('show');
+        invoke('player_set_child_window_visible', { visible: true }).catch(() => {});
         if (returnFocus) elsLocaleBtn.focus();
       }
 
@@ -2947,13 +2985,17 @@
 
       document.addEventListener('click', (e) => {
         if (!elsLocaleBtn.contains(e.target) && !elsLocaleDropdown.contains(e.target)) {
-          elsLocaleDropdown.classList.remove('show');
+          closeLocaleDropdown(false);
         }
       });
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && elsLocaleDropdown.classList.contains('show')) {
           closeLocaleDropdown(true);
         }
+      });
+      // Never leave the video hidden if the menu is open and focus is lost.
+      window.addEventListener('blur', () => {
+        if (elsLocaleDropdown.classList.contains('show')) closeLocaleDropdown(false);
       });
 
       // Theme toggle
@@ -3006,7 +3048,6 @@
 const elsPlaceholder = document.getElementById('placeholder');
             if (elsPlaceholder) elsPlaceholder.style.display = 'none';
             const elsPlay = document.getElementById('btn-play-pause');
-            const elsSeek = document.getElementById('seek-bar');
             const elsSpeed = document.getElementById('speed-select');
             const elsVolume = document.getElementById('volume-bar');
             const elsFullscreen = document.getElementById('btn-fullscreen');
@@ -3014,7 +3055,6 @@ const elsPlaceholder = document.getElementById('placeholder');
             const elsScrubPrevBtn = document.getElementById('btn-scrub-prev');
             const elsScrubNextBtn = document.getElementById('btn-scrub-next');
             if (elsPlay) elsPlay.disabled = false;
-            if (elsSeek) elsSeek.disabled = false;
             if (elsSpeed) elsSpeed.disabled = false;
             if (elsVolume) elsVolume.disabled = false;
             if (elsMuteBtn) elsMuteBtn.disabled = false;
@@ -3123,19 +3163,6 @@ const elsPlaceholder = document.getElementById('placeholder');
         } catch (e) { toast(t('msg.mute-failed', { error: e })); }
       });
 
-      // Seek bar
-      const elsSeek = document.getElementById('seek-bar');
-      elsSeek.addEventListener('change', async (e) => {
-        
-        const t = (parseFloat(e.target.value) / 100) * duration;
-        currentDisplayTime = t;
-        const elsTime = document.getElementById('time-display'); if (elsTime) elsTime.textContent = `${fmtTime(t)} / ${fmtTime(duration)}`;
-        seekTargetTime = t; seekTargetUntil = Date.now() + 300;
-        await (seekChain = seekChain.then(() => invoke('player_seek', { seconds: t })).catch(() => {}));
-        await refreshState();
-        hideScrubPreview();
-      });
-
       // Double-click time to edit
       const elsTimeDisplayEdit = document.getElementById('time-display');
       if (elsTimeDisplayEdit) {
@@ -3203,7 +3230,7 @@ const elsPlaceholder = document.getElementById('placeholder');
         if (e.key === 'End') step = 1;
         if (step !== 0) {
           e.preventDefault();
-          const currentPct = parseFloat(elsSeek.value) / 100;
+          const currentPct = duration > 0 ? currentDisplayTime / duration : 0;
           let newPct = currentPct + step;
           newPct = Math.max(0, Math.min(1, newPct));
           const t = newPct * duration;
@@ -3216,6 +3243,7 @@ const elsPlaceholder = document.getElementById('placeholder');
       // Timeline drag
       let dragStartX = 0;
       let dragStartPct = 0;
+      let dragCurrentPct = 0;
       let dragActive = false;
 
       const startDrag = (clientX) => {
@@ -3230,6 +3258,7 @@ const elsPlaceholder = document.getElementById('placeholder');
           dragStartPct = (clientX - rect.left) / rect.width;
         }
         dragStartPct = Math.max(0, Math.min(1, dragStartPct));
+        dragCurrentPct = dragStartPct;
         dragStartX = clientX;
         moveTimelineHover(clientX);
       };
@@ -3247,12 +3276,12 @@ const elsPlaceholder = document.getElementById('placeholder');
         let pct = dragStartPct + delta;
         pct = Math.max(0, Math.min(1, pct));
         const t = pct * duration;
+        dragCurrentPct = pct;
 
         const elsTimelineProgress = document.getElementById('timeline-progress');
         const elsTimelineThumb = document.getElementById('timeline-thumb');
         if (elsTimelineProgress) elsTimelineProgress.style.width = `${pct * 100}%`;
         if (elsTimelineThumb) elsTimelineThumb.style.left = `${pct * 100}%`;
-        if (elsSeek) elsSeek.value = pct * 100;
         moveTimelineHover(clientX);
       };
 
@@ -3261,7 +3290,7 @@ const elsPlaceholder = document.getElementById('placeholder');
         dragActive = false;
         isScrubbing = false;
         
-        const finalPct = parseFloat(elsSeek.value) / 100;
+        const finalPct = dragCurrentPct;
         const t = finalPct * duration;
         currentDisplayTime = t;
         const elsTime = document.getElementById('time-display');

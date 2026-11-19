@@ -67,6 +67,8 @@ fn main() {
             player::player_is_wayland,
             // mpv child window resize (X11)
             player::player_resize_child_window,
+            // mpv child window visibility (X11) for WebView overlays
+            player::player_set_child_window_visible,
             // subtitles
             subtitle::player_get_tracks,
             subtitle::player_select_subtitle_track,

@@ -220,6 +220,32 @@ pub async fn player_resize_child_window(
     let _ = (child, x, y, width, height);
     Ok(())
 }
+
+#[command]
+pub async fn player_set_child_window_visible(
+    xid_state: State<'_, Mutex<WindowXidState>>,
+    visible: bool,
+) -> Result<(), String> {
+    let child_xid = xid_state.lock().map_err(|e| e.to_string())?.get_child_xid();
+    let Some(child) = child_xid else {
+        return Ok(());
+    };
+    #[cfg(target_os = "linux")]
+    {
+        let display = unsafe { setup::shared_display() };
+        if let Some(display) = display {
+            unsafe {
+                setup::set_child_window_visible(display, child as c_ulong, visible);
+            }
+        } else {
+            return Err("X11 display not available".to_string());
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (child, visible);
+    Ok(())
+}
+
 use std::sync::Arc;
 
 #[command]
@@ -233,9 +259,7 @@ pub async fn player_play_window(
 }
 
 #[command]
-pub async fn player_clear_window(
-    handle: State<'_, Arc<Mutex<MpvPlayer>>>,
-) -> Result<(), String> {
+pub async fn player_clear_window(handle: State<'_, Arc<Mutex<MpvPlayer>>>) -> Result<(), String> {
     let mut p = handle.lock().map_err(|e| e.to_string())?;
     p.clear_window();
     Ok(())

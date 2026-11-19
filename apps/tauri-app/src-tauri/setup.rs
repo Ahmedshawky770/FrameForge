@@ -75,6 +75,7 @@ extern "C" {
         background: c_ulong,
     ) -> c_ulong;
     fn XMapWindow(display: *mut c_void, w: c_ulong) -> c_int;
+    fn XUnmapWindow(display: *mut c_void, w: c_ulong) -> c_int;
     fn XFlush(display: *mut c_void) -> c_int;
     fn XOpenDisplay(display_name: *const c_char) -> *mut c_void;
     fn XRaiseWindow(display: *mut c_void, w: c_ulong) -> c_int;
@@ -152,6 +153,27 @@ pub unsafe fn resize_child_window(
         "[mpv-child] resized child window id={} size={}x{} pos={}+{}",
         win, w, h, x, y
     );
+}
+
+/// Map or unmap the mpv child X11 window.
+///
+/// The child window is raised above the WebView at creation, so anything the
+/// WebView draws over the video area (menus, tooltips) is painted *under* the
+/// video. Unmapping the child window while such an overlay is open is the only
+/// way to let the WebView show content above the video.
+#[cfg(target_os = "linux")]
+/// # Safety
+/// Calls X11 FFI; caller must ensure display/win are valid.
+pub unsafe fn set_child_window_visible(display: *mut c_void, win: c_ulong, visible: bool) {
+    if visible {
+        XMapWindow(display, win);
+        // Keep video above the WebView once it is shown again.
+        XRaiseWindow(display, win);
+    } else {
+        XUnmapWindow(display, win);
+    }
+    XFlush(display);
+    println!("[mpv-child] child window id={} visible={}", win, visible);
 }
 
 /// Setup function called during Tauri app initialization
