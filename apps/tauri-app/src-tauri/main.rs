@@ -84,6 +84,7 @@ fn main() {
             project::project_export,
             project::project_export_cancel,
             project::project_export_progress,
+            project::project_export_encoder,
             project::save_file_dialog,
             project::save_project_dialog,
             project::load_project_dialog,

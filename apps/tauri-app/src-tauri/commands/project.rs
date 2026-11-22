@@ -5,8 +5,8 @@ use frameforge_core_types::{
 };
 use frameforge_edit_engine::{plan_export, validate_edl};
 use frameforge_export_engine::{
-    disk_space_free, output_format_from_extension, ExportExecutor, ReencodeExecutor,
-    StreamCopyExecutor,
+    clear_last_encoder_report, disk_space_free, last_encoder_report, output_format_from_extension,
+    ExportExecutor, ReencodeExecutor, SmartRenderExecutor, StreamCopyExecutor,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::from_str;
@@ -306,7 +306,8 @@ pub async fn project_export(
         edl.clips.len()
     );
 
-    // 5. Reset progress and cancellation token for a fresh run.
+    // 5. Reset progress, cancellation token and encoder report for a fresh run.
+    clear_last_encoder_report();
     {
         let mut s = export_state.lock().map_err(|e| e.to_string())?;
         s.reset();
@@ -316,6 +317,12 @@ pub async fn project_export(
         s.cancel.clone()
     };
     let state_arc = Arc::clone(&*export_state);
+    let is_mp4 = matches!(
+        output_format_from_extension(&dest),
+        Some("mp4") | Some("mov")
+    );
+    let is_mkv = matches!(output_format_from_extension(&dest), Some("matroska"));
+    let use_smart = !plan.merge_plan.lossless && plan.merge_plan.copy_compatible;
 
     // 6. Run the blocking ffmpeg pipeline on the blocking thread pool.
     tokio::task::spawn_blocking(move || -> Result<(), String> {
@@ -336,11 +343,60 @@ pub async fn project_export(
             edl.export.audio_channels,
         );
 
-        let mut executor: Box<dyn ExportExecutor + Send> = if plan.merge_plan.lossless {
-            Box::new(StreamCopyExecutor::new(edl.clips, dest.clone()))
-        } else {
-            Box::new(
-                ReencodeExecutor::new(edl.clips, dest.clone(), encoder_pref, quality_preset)
+        let clips = edl.clips.clone();
+        let encoder_pref = encoder_pref.clone();
+        let quality_preset = quality_preset.clone();
+
+        let progress = move |p: f32| {
+            if let Ok(mut s) = state_arc.lock() {
+                s.progress = p;
+            }
+        };
+
+        if plan.merge_plan.lossless {
+            let mut executor = StreamCopyExecutor::new(clips, dest.clone());
+            return executor
+                .run(&plan, &progress, &cancel_token)
+                .map_err(|e| e.to_string());
+        }
+
+        if is_mp4 && use_smart {
+            frameforge_export_engine::set_last_encoder_report(
+                frameforge_export_engine::EncoderReport {
+                    requested: encoder_pref.clone(),
+                    encoder: "smart copy (copy GOPs + boundary re-encode)".to_string(),
+                    hardware: false,
+                    fallback_reason: None,
+                },
+            );
+            let mut executor = SmartRenderExecutor::new(
+                clips.clone(),
+                dest.clone(),
+                encoder_pref.clone(),
+                quality_preset.clone(),
+            )
+            .with_normalization(
+                target_width,
+                target_height,
+                target_fps_num,
+                target_fps_den,
+                None,
+            target_audio_rate,
+            target_audio_channels,
+        );
+            return match executor.run(&plan, &progress, &cancel_token) {
+                Ok(()) => Ok(()),
+                Err(frameforge_core_types::FrameForgeError::SmartRenderUnsupported(reason)) => {
+                    eprintln!(
+                        "smart render unsupported ({reason}); falling back to full re-encode"
+                    );
+                    clear_last_encoder_report();
+                    let mut fallback = SmartRenderExecutor::new(
+                        clips,
+                        dest.clone(),
+                        encoder_pref,
+                        quality_preset,
+                    )
                     .with_normalization(
                         target_width,
                         target_height,
@@ -349,15 +405,53 @@ pub async fn project_export(
                         None,
                         target_audio_rate,
                         target_audio_channels,
-                    ),
-            )
-        };
+                    )
+                    .with_force_reencode(true);
+                    fallback
+                        .run(&plan, &progress, &cancel_token)
+                        .map_err(|e| e.to_string())
+                }
+                Err(e) => Err(e.to_string()),
+            };
+        }
 
-        let progress = move |p: f32| {
-            if let Ok(mut s) = state_arc.lock() {
-                s.progress = p;
-            }
-        };
+        if is_mp4 || is_mkv {
+            let mut executor = SmartRenderExecutor::new(
+                clips,
+                dest.clone(),
+                encoder_pref,
+                quality_preset,
+            )
+            .with_normalization(
+                target_width,
+                target_height,
+                target_fps_num,
+                target_fps_den,
+                None,
+                target_audio_rate,
+                target_audio_channels,
+            )
+            .with_force_reencode(true);
+            return executor
+                .run(&plan, &progress, &cancel_token)
+                .map_err(|e| e.to_string());
+        }
+
+        let mut executor = ReencodeExecutor::new(
+            clips,
+            dest.clone(),
+            encoder_pref,
+            quality_preset,
+        )
+        .with_normalization(
+            target_width,
+            target_height,
+            target_fps_num,
+            target_fps_den,
+            None,
+            target_audio_rate,
+            target_audio_channels,
+        );
 
         executor
             .run(&plan, &progress, &cancel_token)
@@ -365,6 +459,21 @@ pub async fn project_export(
     })
     .await
     .map_err(|e| format!("export task failed: {e}"))??;
+
+    // 7. Record which encoder actually ran so the UI can show it (hardware
+    // preferences can silently degrade to software).
+    let encoder_label = match last_encoder_report() {
+        Some(report) => match report.fallback_reason {
+            Some(reason) => format!("{} ({reason})", report.encoder),
+            None => report.encoder,
+        },
+        // The stream-copy executor never resolves an encoder.
+        None => "copy (lossless stream copy)".to_string(),
+    };
+    {
+        let mut s = export_state.lock().map_err(|e| e.to_string())?;
+        s.last_encoder = Some(encoder_label);
+    }
 
     Ok(())
 }
@@ -386,6 +495,15 @@ pub async fn project_export_progress(
 ) -> Result<f32, String> {
     let s = export_state.lock().map_err(|e| e.to_string())?;
     Ok(s.progress)
+}
+
+/// Describe the encoder used by the most recent export, if any.
+#[command]
+pub async fn project_export_encoder(
+    export_state: State<'_, Arc<Mutex<ExportState>>>,
+) -> Result<Option<String>, String> {
+    let s = export_state.lock().map_err(|e| e.to_string())?;
+    Ok(s.last_encoder.clone())
 }
 
 /// Open a save file dialog for choosing the export destination.

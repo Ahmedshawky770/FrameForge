@@ -191,11 +191,16 @@ pub struct ExportState {
     pub progress: f32,
     /// Cancellation token shared with the export executor.
     pub cancel: CancelToken,
+    /// Human-readable description of the encoder the last export actually used
+    /// (e.g. `h264_nvenc`, `libx264 (software)`, `copy (lossless stream copy)`).
+    /// `None` before the first export or when the export was cancelled.
+    pub last_encoder: Option<String>,
 }
 
 impl ExportState {
     pub fn reset(&mut self) {
         self.progress = 0.0;
         self.cancel = CancelToken::new();
+        self.last_encoder = None;
     }
 }
