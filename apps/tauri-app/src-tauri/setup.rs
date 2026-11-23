@@ -221,7 +221,7 @@ pub async fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 let display = unsafe { shared_display() };
                 if let Some(display) = display {
                     if let Some(child) =
-                        unsafe { create_child_window(display, xid as c_ulong, 0, 0, 1280, 720) }
+                        unsafe { create_child_window(display, xid as c_ulong, 0, 0, 1, 1) }
                     {
                         guard.set_child_xid(child);
                         println!("Created mpv child window (XID): {}", child);

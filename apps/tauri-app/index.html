@@ -4192,26 +4192,7 @@ const elsPlaceholder = document.getElementById('placeholder');
       finally { setExportBusy(false); }
     });
 
-    init().then(async () => {
-      try {
-        const p = '/tmp/full.mp4';
-        currentFile = p;
-        await invoke('player_load', { src: p });
-        await new Promise(r => setTimeout(r, 1500));
-        await refreshState();
-        window.deleteRanges.length = 0;
-        window.deleteRanges.push({ start: 1, end: 3 });
-        // best effort render
-        try { renderDeleteRanges(); } catch (e) {}
-        await new Promise(r => setTimeout(r, 500));
-        const btn = document.getElementById('btn-export-deleted');
-        if (btn) btn.click();
-        await new Promise(r => setTimeout(r, 8000));
-        await invoke('project_save', { edlJson: 'UIFLOW_DONE', path: '/tmp/uiflow.txt' });
-      } catch (e) {
-        await invoke('project_save', { edlJson: 'UIFLOW_ERR: ' + e, path: '/tmp/uiflow.txt' });
-      }
-    });
+    init().catch((e) => console.error('init failed', e));
   </script>
 
 </body>
