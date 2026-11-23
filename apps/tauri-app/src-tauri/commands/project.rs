@@ -322,7 +322,7 @@ pub async fn project_export(
         Some("mp4") | Some("mov")
     );
     let is_mkv = matches!(output_format_from_extension(&dest), Some("matroska"));
-    let use_smart = !plan.merge_plan.lossless && plan.merge_plan.copy_compatible;
+    let use_smart = plan.merge_plan.copy_compatible;
 
     // 6. Run the blocking ffmpeg pipeline on the blocking thread pool.
     tokio::task::spawn_blocking(move || -> Result<(), String> {
@@ -353,7 +353,7 @@ pub async fn project_export(
             }
         };
 
-        if plan.merge_plan.lossless {
+        if plan.merge_plan.lossless && !plan.merge_plan.copy_compatible {
             let mut executor = StreamCopyExecutor::new(clips, dest.clone());
             return executor
                 .run(&plan, &progress, &cancel_token)
