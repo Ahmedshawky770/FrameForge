@@ -1733,8 +1733,8 @@ fn remux_segment(
     let seg_base_dts: Vec<i64> = ctx.base_dts_offsets.to_vec();
     let mut last_final_pts: Vec<Option<i64>> = vec![None; ctx.base_offsets.len()];
     let mut last_final_dts: Vec<Option<i64>> = vec![None; ctx.base_offsets.len()];
-    let mut last_final_pts_dur: Vec<i64> = vec![0; ctx.base_offsets.len()];
-    let mut last_final_dts_dur: Vec<i64> = vec![0; ctx.base_offsets.len()];
+    let mut second_last_final_pts: Vec<Option<i64>> = vec![None; ctx.base_offsets.len()];
+    let mut second_last_final_dts: Vec<Option<i64>> = vec![None; ctx.base_offsets.len()];
 
     for (stream, mut packet) in ctx.ictx.packets() {
         if cancel.is_cancelled() {
@@ -1861,18 +1861,27 @@ fn remux_segment(
         packet.set_pts(Some(adjusted_pts));
         packet.set_dts(Some(adjusted_dts));
 
-        let pkt_dur_out = packet.duration();
-        // Track the duration of the packet that carries the max PTS/DTS so the
-        // next segment's base offset advances by the real written duration.
+        // Track the two largest PTS/DTS so the next segment's base offset
+        // advances by the real frame duration instead of a single tick.
         if last_final_pts[ost_index as usize].is_none()
-            || adjusted_pts >= last_final_pts[ost_index as usize].unwrap_or(adjusted_pts)
+            || adjusted_pts > last_final_pts[ost_index as usize].unwrap_or(adjusted_pts)
         {
-            last_final_pts_dur[ost_index as usize] = if pkt_dur_out > 0 { pkt_dur_out } else { 1 };
+            second_last_final_pts[ost_index as usize] = last_final_pts[ost_index as usize];
+            last_final_pts[ost_index as usize] = Some(adjusted_pts);
+        } else if second_last_final_pts[ost_index as usize].is_none()
+            || adjusted_pts > second_last_final_pts[ost_index as usize].unwrap_or(adjusted_pts)
+        {
+            second_last_final_pts[ost_index as usize] = Some(adjusted_pts);
         }
         if last_final_dts[ost_index as usize].is_none()
-            || adjusted_dts >= last_final_dts[ost_index as usize].unwrap_or(adjusted_dts)
+            || adjusted_dts > last_final_dts[ost_index as usize].unwrap_or(adjusted_dts)
         {
-            last_final_dts_dur[ost_index as usize] = if pkt_dur_out > 0 { pkt_dur_out } else { 1 };
+            second_last_final_dts[ost_index as usize] = last_final_dts[ost_index as usize];
+            last_final_dts[ost_index as usize] = Some(adjusted_dts);
+        } else if second_last_final_dts[ost_index as usize].is_none()
+            || adjusted_dts > second_last_final_dts[ost_index as usize].unwrap_or(adjusted_dts)
+        {
+            second_last_final_dts[ost_index as usize] = Some(adjusted_dts);
         }
 
         stream_written[ost_index as usize] = true;
@@ -1905,7 +1914,10 @@ fn remux_segment(
         .take(ctx.base_offsets.len())
     {
         if let Some(p) = p {
-            let dur = last_final_pts_dur[i].max(1);
+            let dur = match (second_last_final_pts[i], *p) {
+                (Some(prev), cur) if cur > prev => (cur - prev).max(1),
+                _ => 1,
+            };
             ctx.base_offsets[i] = p + dur;
         }
     }
@@ -1915,7 +1927,10 @@ fn remux_segment(
         .take(ctx.base_dts_offsets.len())
     {
         if let Some(d) = d {
-            let dur = last_final_dts_dur[i].max(1);
+            let dur = match (second_last_final_dts[i], *d) {
+                (Some(prev), cur) if cur > prev => (cur - prev).max(1),
+                _ => 1,
+            };
             ctx.base_dts_offsets[i] = d + dur;
         }
     }
