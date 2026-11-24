@@ -699,11 +699,18 @@ impl MprisTrackList {
 
     async fn get_tracks_metadata(
         &self,
-        _track_ids: Vec<OwnedObjectPath>,
+        track_ids: Vec<OwnedObjectPath>,
     ) -> Result<Vec<OwnedVariant>, zbus::fdo::Error> {
-        // TODO: Implement proper metadata return type
-        // For now, return empty array
-        Ok(Vec::new())
+        let tracks = self.state.track_list.lock().await;
+        let mut result = Vec::new();
+        for id in &track_ids {
+            if let Some(track) = tracks.iter().find(|t| t.id == *id) {
+                result.push(metadata_to_owned_value(&track.metadata));
+            } else {
+                result.push(metadata_to_owned_value(&MprisMetadata::default()));
+            }
+        }
+        Ok(result)
     }
 }
 
