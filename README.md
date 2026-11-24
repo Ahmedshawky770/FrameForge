@@ -9,7 +9,7 @@ Linux-first video player/editing core and desktop app. Built in Rust (Tauri 2 + 
 
 ## Scope (v1)
 **In:** playback, precision scrubbing, multi-segment cut (keep/remove), ordered merge, lossless stream-copy or re-encode export, EDL JSON projects, keyboard shortcuts, Arabic/RTL UI, `<media-player>` web component (playback only), MPRIS D-Bus integration, hardware decode/encode (VAAPI/NVDEC/NVENC), subtitle support via libass.
-**Out:** multi-track timeline, effects/transitions/color grading, DRM, streaming service, library management, Windows/macOS in v1, microsecond precision, zero-copy across WebView boundary.
+**Out:** effects/transitions/color grading, DRM, streaming service, library management, Windows/macOS in v1, zero-copy across WebView boundary.
 
 ## Honest limitations
 - Lossless cuts are keyframe-only; frame-accurate cuts require re-encode. Actual cut points are shown to the user.

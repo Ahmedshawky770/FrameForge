@@ -11,7 +11,7 @@
 //! remains the playback path; scrub-engine provides the seek targets that
 //! mpv-adapter executes for playback scrubbing.
 
-use ffmpeg_next::{codec, decoder, media, software::scaling::Flags, threading, util::error::Error as FfmpegError};
+use ffmpeg_next::{codec, decoder, media, threading, util::error::Error as FfmpegError};
 use frameforge_core_types::{FrameForgeError, Result, Timebase, Timestamp};
 #[allow(clippy::single_component_path_imports)]
 use libc;
@@ -64,9 +64,9 @@ pub struct ScrubSession {
     decoder: Option<decoder::Video>,
     video_stream_idx: Option<usize>,
     time_base: Option<ffmpeg_next::Rational>,
-    current_path: Option<std::path::PathBuf>,
+    pub current_path: Option<std::path::PathBuf>,
     /// Current frame PTS (in stream time base) for next/prev frame navigation.
-    current_pts: Option<i64>,
+    pub current_pts: Option<i64>,
     sws_cache: SwsCache,
 }
 
@@ -122,9 +122,9 @@ impl ScrubSession {
             let mut tb: Option<ffmpeg_next::Rational> = None;
             let mut par: Option<ffmpeg_next::codec::Parameters> = None;
 
-            for (i, stream) in ictx.streams().enumerate() {
+            for stream in ictx.streams() {
                 if stream.parameters().medium() == media::Type::Video {
-                    idx = Some(i as u32);
+                    idx = Some(stream.index() as u32);
                     tb = Some(stream.time_base());
                     par = Some(stream.parameters().clone());
                     break;
@@ -140,16 +140,21 @@ impl ScrubSession {
 
         // Find the decoder for the video stream.
         let codec_id = codecpar.id();
-        let mut ctx = codec::Context::from_parameters(codecpar.clone())
-            .map_err(|e| FrameForgeError::Probe(format!("decoder context creation failed (codec={:?}): {e}", codec_id)))?;
+        let mut ctx = codec::Context::from_parameters(codecpar.clone()).map_err(|e| {
+            FrameForgeError::Probe(format!(
+                "decoder context creation failed (codec={:?}): {e}",
+                codec_id
+            ))
+        })?;
         ctx.set_threading(threading::Config {
             kind: threading::Type::Frame,
             count: 0,
             safe: true,
         });
         // .video() finds the right decoder and opens it in one call (avcodec_open2 with codec).
-        let decoder = ctx.decoder().video()
-            .map_err(|e| FrameForgeError::Probe(format!("decoder open failed (codec={:?}): {e}", codec_id)))?;
+        let decoder = ctx.decoder().video().map_err(|e| {
+            FrameForgeError::Probe(format!("decoder open failed (codec={:?}): {e}", codec_id))
+        })?;
 
         self.ictx = Some(ictx);
         self.decoder = Some(decoder);
@@ -179,35 +184,33 @@ impl ScrubSession {
             FrameForgeError::Seek("no video stream index; call open_file first".into())
         })?;
 
-        let time_base = time_base.ok_or_else(|| {
-            FrameForgeError::Seek("no time base; call open_file first".into())
-        })?;
+        let time_base = time_base
+            .ok_or_else(|| FrameForgeError::Seek("no time base; call open_file first".into()))?;
 
-        let ictx = ictx.as_mut().ok_or_else(|| {
-            FrameForgeError::Seek("no file open; call open_file first".into())
-        })?;
-        let decoder = decoder.as_mut().ok_or_else(|| {
-            FrameForgeError::Seek("no decoder open; call open_file first".into())
-        })?;
+        let ictx = ictx
+            .as_mut()
+            .ok_or_else(|| FrameForgeError::Seek("no file open; call open_file first".into()))?;
+        let decoder = decoder
+            .as_mut()
+            .ok_or_else(|| FrameForgeError::Seek("no decoder open; call open_file first".into()))?;
 
-        // Convert target PTS to the stream's time base.
+        // Seek uses AV_TIME_BASE (microseconds), so convert target seconds.
         let target_seconds = target.to_seconds();
-        let tb_seconds = time_base.0 as f64 / time_base.1 as f64;
-        let target_pts_in_tb = if tb_seconds > 0.0 {
-            (target_seconds / tb_seconds) as i64
-        } else {
-            target.value
-        };
+        let target_us = (target_seconds * 1_000_000.0) as i64;
 
         // av_seek_frame to the keyframe at-or-before target.
         // Seek range: from beginning of file up to target PTS.
-        ictx.seek(target_pts_in_tb, i64::MIN..target_pts_in_tb)
+        ictx.seek(target_us, i64::MIN..target_us)
             .map_err(|e| FrameForgeError::Seek(format!("seek failed: {e}")))?;
+
+        // Flush decoder buffers after seek (proper API, not EOF-inducing empty packet).
+        decoder.flush();
 
         // Decode forward, discarding frames before target.
         let mut frame = ffmpeg_next::util::frame::Video::empty();
 
         let mut found = None;
+        let mut _dbg_total = 0usize;
         for (_stream, pkt) in ictx.packets() {
             if token.is_cancelled() {
                 return Ok(ScrubResult {
@@ -234,6 +237,7 @@ impl ScrubSession {
                 match decoder.receive_frame(&mut frame) {
                     Ok(_) => {
                         let frame_pts = frame.pts().unwrap_or(0);
+                        let tb_seconds = time_base.0 as f64 / time_base.1 as f64;
                         let frame_seconds = frame_pts as f64 * tb_seconds;
                         if frame_seconds >= target_seconds - 1e-6 {
                             // Found the target frame (or the first frame at/after target).
@@ -242,7 +246,10 @@ impl ScrubSession {
                             let data = video_frame_to_rgba(&frame, sws_cache, out_w, out_h)?;
                             *current_pts = Some(frame_pts);
                             found = Some(DecodedFrame {
-                                pts: Timestamp::new(frame_pts, Timebase::new(time_base.0 as i64, time_base.1 as i64)),
+                                pts: Timestamp::new(
+                                    frame_pts,
+                                    Timebase::new(time_base.0 as i64, time_base.1 as i64),
+                                ),
                                 width: frame.width(),
                                 height: frame.height(),
                                 data,
@@ -304,9 +311,9 @@ impl ScrubSession {
             .decoder
             .as_mut()
             .ok_or_else(|| FrameForgeError::Seek("no decoder open; call open_file first".into()))?;
-        let video_stream_idx = self
-            .video_stream_idx
-            .ok_or_else(|| FrameForgeError::Seek("no video stream index; call open_file first".into()))?;
+        let video_stream_idx = self.video_stream_idx.ok_or_else(|| {
+            FrameForgeError::Seek("no video stream index; call open_file first".into())
+        })?;
         let time_base = self
             .time_base
             .ok_or_else(|| FrameForgeError::Seek("no time base; call open_file first".into()))?;
@@ -325,27 +332,26 @@ impl ScrubSession {
 
             decoder.send_packet(&pkt).ok();
 
-            loop {
-                if self.token.is_cancelled() {
-                    return Ok(None);
+            if self.token.is_cancelled() {
+                return Ok(None);
+            }
+            match decoder.receive_frame(&mut frame) {
+                Ok(_) => {
+                    let frame_pts = frame.pts().unwrap_or(0);
+                    let out_w = frame.width();
+                    let out_h = frame.height();
+                    let data = video_frame_to_rgba(&frame, &mut self.sws_cache, out_w, out_h)?;
+                    let frame_tb = Timebase::new(time_base.0 as i64, time_base.1 as i64);
+                    self.current_pts = Some(frame_pts);
+                    return Ok(Some(DecodedFrame {
+                        pts: Timestamp::new(frame_pts, frame_tb),
+                        width: frame.width(),
+                        height: frame.height(),
+                        data,
+                    }));
                 }
-                match decoder.receive_frame(&mut frame) {
-                    Ok(_) => {
-                        let frame_pts = frame.pts().unwrap_or(0);
-                        let out_w = frame.width();
-                        let out_h = frame.height();
-                        let data = video_frame_to_rgba(&frame, &mut self.sws_cache, out_w, out_h)?;
-                        let frame_tb = Timebase::new(time_base.0 as i64, time_base.1 as i64);
-                        return Ok(Some(DecodedFrame {
-                            pts: Timestamp::new(frame_pts, frame_tb),
-                            width: frame.width(),
-                            height: frame.height(),
-                            data,
-                        }));
-                    }
-                    Err(FfmpegError::Other { errno }) if errno == libc::EAGAIN => break,
-                    Err(_) => break,
-                }
+                Err(FfmpegError::Other { errno }) if errno == libc::EAGAIN => {}
+                Err(_) => {}
             }
         }
 
@@ -372,9 +378,9 @@ impl ScrubSession {
             .decoder
             .as_mut()
             .ok_or_else(|| FrameForgeError::Seek("no decoder open; call open_file first".into()))?;
-        let video_stream_idx = self
-            .video_stream_idx
-            .ok_or_else(|| FrameForgeError::Seek("no video stream index; call open_file first".into()))?;
+        let video_stream_idx = self.video_stream_idx.ok_or_else(|| {
+            FrameForgeError::Seek("no video stream index; call open_file first".into())
+        })?;
         let time_base = self
             .time_base
             .ok_or_else(|| FrameForgeError::Seek("no time base; call open_file first".into()))?;
@@ -387,18 +393,18 @@ impl ScrubSession {
         let frame_duration_tb = (1.0 / 30.0 / tb_seconds).max(1.0) as i64; // ~30fps fallback
         let target_pts = current_pts.saturating_sub(frame_duration_tb);
 
+        // Convert stream time-base units to microseconds for seek (AV_TIME_BASE).
+        let target_us = (target_pts as f64 * tb_seconds * 1_000_000.0) as i64;
+
         // Seek to keyframe at or before target.
-        ictx.seek(target_pts, i64::MIN..target_pts)
+        ictx.seek(target_us, i64::MIN..target_us)
             .map_err(|e| FrameForgeError::Seek(format!("seek failed: {e}")))?;
 
-        // Flush decoder to clear any buffered frames.
-        decoder.send_packet(&ffmpeg_next::Packet::empty()).ok();
-        let mut frame = ffmpeg_next::util::frame::Video::empty();
-        while decoder.receive_frame(&mut frame).is_ok() {
-            // Drain buffered frames.
-        }
+        // Flush decoder buffers after seek.
+        decoder.flush();
 
         // Decode forward to find the frame just before current_pts.
+        let mut frame = ffmpeg_next::util::frame::Video::empty();
         let mut prev_frame_data: Option<DecodedFrame> = None;
         let mut prev_frame_pts: Option<i64> = None;
 
@@ -419,6 +425,7 @@ impl ScrubSession {
                 match decoder.receive_frame(&mut frame) {
                     Ok(_) => {
                         let frame_pts = frame.pts().unwrap_or(0);
+                        let tb_seconds = time_base.0 as f64 / time_base.1 as f64;
                         let frame_seconds = frame_pts as f64 * tb_seconds;
                         let current_seconds = current_pts as f64 * tb_seconds;
 
@@ -553,7 +560,8 @@ fn video_frame_to_rgba(
     }
     let scaler = cache.ctx.as_mut().unwrap();
     let mut rgba = ffmpeg_next::frame::Video::empty();
-    scaler.run(frame, &mut rgba)
+    scaler
+        .run(frame, &mut rgba)
         .map_err(|e| FrameForgeError::Probe(format!("sws run failed: {e}")))?;
     // نسخ صف صف (الـ stride فيه padding)
     let stride = rgba.stride(0);

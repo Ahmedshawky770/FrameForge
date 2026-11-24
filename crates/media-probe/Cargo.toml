@@ -9,9 +9,6 @@ thiserror = { workspace = true }
 frameforge-core-types = { path = "../core-types" }
 ffmpeg-next = { workspace = true }
 
-[features]
-default = ["ffmpeg"]
-ffmpeg = []
 
 [lib]
 path = "src/lib.rs"

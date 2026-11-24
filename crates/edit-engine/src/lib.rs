@@ -4,11 +4,14 @@
 //! keyframe index for lossless cut-point snapping.
 
 use frameforge_core_types::{
-    Clip, Edl, ExportMode, FrameForgeError, Result, SourceId, TimeRange, Timestamp, TimelineItem, Track, TrackKind,
+    Clip, Edl, ExportMode, FrameForgeError, ItemId, Result, SourceId, TimeRange, TimelineItem,
+    Timestamp, Track, TrackKind,
 };
-use frameforge_media_probe::{build_keyframe_index, probe, StreamInfo};
+use frameforge_media_probe::{build_keyframe_index_cached, probe, StreamInfo};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// A planned export segment with snapped cut points.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -43,8 +46,13 @@ pub enum SnapMode {
 
 impl PlannedSegment {
     /// Whether this segment can be stream-copied losslessly.
+    ///
+    /// A segment is lossless when its cut points land exactly on the requested
+    /// range boundaries (i.e. keyframe-aligned / no expansion required).
     pub fn is_lossless_cut(&self) -> bool {
-        true
+        self.cut_points.len() >= 2
+            && (self.cut_points[0].to_seconds() - self.range.start.to_seconds()).abs() < 1e-6
+            && (self.cut_points[1].to_seconds() - self.range.end.to_seconds()).abs() < 1e-6
     }
 }
 
@@ -52,6 +60,12 @@ impl PlannedSegment {
 pub struct MergePlan {
     pub order: Vec<SourceId>,
     pub lossless: bool,
+    /// Inputs are compatible enough to copy the fully-keyframe-aligned parts
+    /// of the timeline. This is true even when `lossless` is false because the
+    /// requested cuts are not keyframe-aligned and the boundary GOPs must be
+    /// re-encoded.
+    #[serde(default)]
+    pub copy_compatible: bool,
     pub reasons: Vec<String>,
     pub alternative: String,
 }
@@ -133,7 +147,20 @@ impl StreamParams {
                 self.width, self.height, other.width, other.height
             ));
         }
-        if self.fps_num != other.fps_num || self.fps_den != other.fps_den {
+        // Compare frame rates as rationals (cross-multiplied) so that
+        // unreduced forms such as 1166914799/46675367 and 25/1 that
+        // represent the same rate are not falsely flagged as a mismatch.
+        // A missing rate on either side is treated as unknown and only
+        // flagged when exactly one side has a value.
+        let fps_equal = match (self.fps_num, self.fps_den, other.fps_num, other.fps_den) {
+            (Some(a), Some(b), Some(c), Some(d)) => {
+                (a as u64) * (d as u64) == (c as u64) * (b as u64)
+            }
+            (None, None, None, None) => true,
+            (None, _, None, _) | (_, None, _, None) => true,
+            _ => false,
+        };
+        if !fps_equal {
             reasons.push(format!(
                 "fps mismatch: {}/{} vs {}/{}",
                 self.fps_num.unwrap_or(0),
@@ -170,17 +197,42 @@ impl StreamParams {
     }
 }
 
-/// Probe all clips and extract their first video stream params for compatibility.
-fn probe_clip_params(path: &Path) -> Result<StreamParams> {
-    let result = probe(path)?;
-    let video = result
-        .streams
-        .iter()
-        .find(|s| matches!(s.kind, frameforge_media_probe::StreamKind::Video))
-        .ok_or_else(|| {
-            FrameForgeError::Compatibility(format!("no video stream in {}", path.display()))
-        })?;
-    Ok(StreamParams::from_stream_info(video))
+/// Timeline items for a track, deriving them from the EDL clips when the track
+/// carries none (CLI / minimal EDLs).
+fn track_items<'a>(track: &'a Track, clips: &'a [Clip]) -> Cow<'a, [TimelineItem]> {
+    if !track.items.is_empty() || !matches!(track.kind, TrackKind::Video) {
+        return Cow::Borrowed(&track.items);
+    }
+
+    let mut v = Vec::new();
+    let mut cursor = 0.0f64;
+    for clip in clips {
+        for seg in &clip.segments {
+            let dur = seg.range.duration_seconds();
+            v.push(TimelineItem {
+                id: ItemId::default(),
+                source_id: clip.id,
+                name: clip
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "clip".into()),
+                path: clip.path.clone(),
+                source_range: seg.range,
+                timeline_start: Timestamp::from_seconds(cursor, seg.range.start.tb),
+                track_index: track.index.unwrap_or(0),
+                transition_in: None,
+                transition_out: None,
+                volume: 1.0,
+                opacity: 1.0,
+                enabled: true,
+                locked: false,
+            });
+            cursor += dur;
+        }
+    }
+
+    Cow::Owned(v)
 }
 
 /// Plan an export from an EDL with keyframe snapping for lossless mode.
@@ -192,15 +244,52 @@ pub fn plan_export(edl: &Edl) -> Result<ExportPlan> {
     let mut all_segments = Vec::new();
     let mut track_plans = Vec::new();
     let mut order = Vec::new();
+    // Track whether every cut lands on a keyframe. Non-keyframe cuts require
+    // re-encoding even in StreamCopy mode; otherwise stream-copy would start
+    // mid-GOP and produce broken (blocky) frames.
+    let mut all_keyframe_aligned = true;
+
+    // Stream-copy snapping needs a keyframe index, and building one reads the
+    // packet table of the file. Compute the farthest point needed per file up
+    // front so each file's index is built once (and cached across segments)
+    // instead of once per segment.
+    let max_end_by_path: HashMap<PathBuf, f64> = if edl.export.mode == ExportMode::StreamCopy {
+        let mut m: HashMap<PathBuf, f64> = HashMap::new();
+        for track in &edl.tracks {
+            if !track.enabled {
+                continue;
+            }
+            for item in track_items(track, &edl.clips).iter() {
+                if !item.enabled {
+                    continue;
+                }
+                let end = item.source_range.end.to_seconds();
+                m.entry(item.path.clone())
+                    .and_modify(|v| {
+                        if end > *v {
+                            *v = end;
+                        }
+                    })
+                    .or_insert(end);
+            }
+        }
+        m
+    } else {
+        HashMap::new()
+    };
 
     for track in &edl.tracks {
         if !track.enabled {
             continue;
         }
 
+        // Derive timeline items from clips when a track has none, so callers
+        // (e.g. CLI) that only provide clips still get a valid export plan.
+        let items = track_items(track, &edl.clips);
+
         let mut track_items = Vec::new();
 
-        for item in &track.items {
+        for item in items.iter() {
             if !item.enabled {
                 continue;
             }
@@ -213,7 +302,21 @@ pub fn plan_export(edl: &Edl) -> Result<ExportPlan> {
                 SnapMode::Exact
             };
 
-            let cut_points = snap_cut_points(&item.path, item.source_range, snap_mode)?;
+            let max_end = max_end_by_path.get(&item.path).copied();
+            let snapped = snap_cut_points(&item.path, item.source_range, snap_mode, max_end)?;
+            // Precision: if snapping moved the cut away from the requested
+            // boundary (non-keyframe cut), keep the exact requested boundaries
+            // so the (re-encode) path cuts precisely instead of silently
+            // expanding the kept segments to keyframes.
+            let aligned = cuts_are_keyframe_aligned(&snapped, &item.source_range);
+            if edl.export.mode == ExportMode::StreamCopy && !aligned {
+                all_keyframe_aligned = false;
+            }
+            let cut_points = if edl.export.mode == ExportMode::StreamCopy && !aligned {
+                vec![item.source_range.start, item.source_range.end]
+            } else {
+                snapped
+            };
 
             let segment = PlannedSegment {
                 source_id: item.source_id,
@@ -244,17 +347,24 @@ pub fn plan_export(edl: &Edl) -> Result<ExportPlan> {
     }
 
     if all_segments.is_empty() {
-        return Err(FrameForgeError::InvalidEdl("No enabled items in any track".into()));
+        return Err(FrameForgeError::InvalidEdl(
+            "No enabled items in any track".into(),
+        ));
     }
 
     let report = analyze_compatibility_tracks(&edl.tracks)?;
     let lossless = edl.export.mode == ExportMode::StreamCopy
         && report.lossless_possible
-        && all_cuts_on_keyframes(&all_segments);
+        && all_keyframe_aligned;
+    // Even when the requested cuts do not land on keyframes, the inputs may
+    // still be compatible enough to copy every GOP that is fully inside the
+    // kept range and re-encode only the boundary GOPs (smart rendering).
+    let copy_compatible = edl.export.mode == ExportMode::StreamCopy && report.lossless_possible;
 
     let merge_plan = MergePlan {
         order,
         lossless,
+        copy_compatible,
         reasons: report.reasons.clone(),
         alternative: report.alternative.clone(),
     };
@@ -266,21 +376,26 @@ pub fn plan_export(edl: &Edl) -> Result<ExportPlan> {
     })
 }
 
-/// Check that every segment's cut points are on keyframes (required for lossless).
-fn all_cuts_on_keyframes(segments: &[PlannedSegment]) -> bool {
-    segments.iter().all(|s| {
-        s.cut_points.len() >= 2
-    })
+/// Whether snapped cut points match the requested range boundaries (i.e. the
+/// cut lands on a keyframe / exact frame and needs no expansion).
+fn cuts_are_keyframe_aligned(cut_points: &[Timestamp], range: &TimeRange) -> bool {
+    cut_points.len() >= 2
+        && (cut_points[0].to_seconds() - range.start.to_seconds()).abs() < 1e-6
+        && (cut_points[1].to_seconds() - range.end.to_seconds()).abs() < 1e-6
 }
 
 /// Snap cut points to nearest keyframes for lossless mode, or exact frames for re-encode.
-fn snap_cut_points(path: &Path, range: TimeRange, mode: SnapMode) -> Result<Vec<Timestamp>> {
+fn snap_cut_points(
+    path: &Path,
+    range: TimeRange,
+    mode: SnapMode,
+    max_end: Option<f64>,
+) -> Result<Vec<Timestamp>> {
     match mode {
-        SnapMode::Exact => {
-            Ok(vec![range.start, range.end])
-        }
+        SnapMode::Exact => Ok(vec![range.start, range.end]),
         SnapMode::Keyframe => {
-            let idx = build_keyframe_index(path)?;
+            // Cached: one index per file per export, not one per segment.
+            let idx = build_keyframe_index_cached(path, max_end)?;
             let _tb = range.start.tb;
 
             let start_snapped = idx
@@ -289,10 +404,8 @@ fn snap_cut_points(path: &Path, range: TimeRange, mode: SnapMode) -> Result<Vec<
                 .unwrap_or(range.start);
 
             let end_snapped = idx
-                .entries
-                .iter()
-                .find(|e| e.pts.to_seconds() >= range.end.to_seconds())
-                .map(|e| e.pts)
+                .first_keyframe_at_or_after(&range.end)
+                .map(|k| k.pts)
                 .unwrap_or(range.end);
 
             // Ensure start <= end. If snapping crosses the range boundary,
@@ -313,21 +426,22 @@ fn snap_cut_points(path: &Path, range: TimeRange, mode: SnapMode) -> Result<Vec<
     }
 }
 
-/// Analyze compatibility across tracks using real probe data.
-fn analyze_compatibility_tracks(tracks: &[Track]) -> Result<CompatibilityReport> {
-    // Collect all video items from all tracks
-    let mut video_items: Vec<&TimelineItem> = Vec::new();
-    for track in tracks {
-        if matches!(track.kind, TrackKind::Video) {
-            for item in &track.items {
-                if item.enabled {
-                    video_items.push(item);
-                }
-            }
+/// Analyze compatibility across a list of clip paths using real probe data.
+///
+/// Probes each path exactly once (no fabricated durations or placeholder
+/// items). Paths that cannot be probed or that have no video stream produce
+/// an error naming the offending file instead of being silently skipped.
+pub fn analyze_compatibility_paths(paths: &[PathBuf]) -> Result<CompatibilityReport> {
+    // Deduplicate while preserving order so a repeated clip does not create
+    // spurious mismatches.
+    let mut unique: Vec<PathBuf> = Vec::new();
+    for p in paths {
+        if !unique.iter().any(|u| u == p) {
+            unique.push(p.clone());
         }
     }
 
-    if video_items.is_empty() {
+    if unique.len() < 2 {
         return Ok(CompatibilityReport {
             lossless_possible: true,
             reasons: Vec::new(),
@@ -335,29 +449,29 @@ fn analyze_compatibility_tracks(tracks: &[Track]) -> Result<CompatibilityReport>
         });
     }
 
-    if video_items.len() < 2 {
-        return Ok(CompatibilityReport {
-            lossless_possible: true,
-            reasons: Vec::new(),
-            alternative: "stream-copy".into(),
-        });
+    // Probe every clip once and collect its video-stream params.
+    let mut probed: Vec<(PathBuf, StreamParams)> = Vec::with_capacity(unique.len());
+    for path in &unique {
+        let result = probe(path)
+            .map_err(|e| FrameForgeError::Probe(format!("{}: {}", path.display(), e)))?;
+        let video = result
+            .streams
+            .iter()
+            .find(|s| matches!(s.kind, frameforge_media_probe::StreamKind::Video))
+            .ok_or_else(|| {
+                FrameForgeError::Compatibility(format!("no video stream in {}", path.display()))
+            })?;
+        probed.push((path.clone(), StreamParams::from_stream_info(video)));
     }
 
-    // Probe first video item as reference.
-    let ref_params = probe_clip_params(&video_items[0].path)?;
+    // Use the first clip as the reference.
+    let ref_params = &probed[0].1;
 
     let mut reasons = Vec::new();
-
-    for item in &video_items[1..] {
-        let params = probe_clip_params(&item.path)?;
-        let item_reasons = ref_params.compatible_with(&params);
+    for (path, params) in &probed[1..] {
+        let item_reasons = ref_params.compatible_with(params);
         if !item_reasons.is_empty() {
-            reasons.push(format!(
-                "item {} ({}): {}",
-                item.id.0,
-                item.path.display(),
-                item_reasons.join(", ")
-            ));
+            reasons.push(format!("{}: {}", path.display(), item_reasons.join(", ")));
         }
     }
 
@@ -375,6 +489,23 @@ fn analyze_compatibility_tracks(tracks: &[Track]) -> Result<CompatibilityReport>
     })
 }
 
+/// Analyze compatibility across tracks using real probe data.
+fn analyze_compatibility_tracks(tracks: &[Track]) -> Result<CompatibilityReport> {
+    // Collect enabled video items' paths from all tracks (de-duplicated inside
+    // analyze_compatibility_paths).
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for track in tracks {
+        if matches!(track.kind, TrackKind::Video) {
+            for item in &track.items {
+                if item.enabled {
+                    paths.push(item.path.clone());
+                }
+            }
+        }
+    }
+    analyze_compatibility_paths(&paths)
+}
+
 /// Public compatibility analyzer.
 pub fn analyze_compatibility(tracks: &[Track]) -> Result<CompatibilityReport> {
     analyze_compatibility_tracks(tracks)
@@ -384,7 +515,12 @@ pub fn analyze_compatibility(tracks: &[Track]) -> Result<CompatibilityReport> {
 pub fn validate_edl(edl: &Edl) -> Result<()> {
     for track in &edl.tracks {
         let mut sorted_items: Vec<_> = track.items.iter().collect();
-        sorted_items.sort_by(|a, b| a.timeline_start.to_seconds().partial_cmp(&b.timeline_start.to_seconds()).unwrap());
+        sorted_items.sort_by(|a, b| {
+            a.timeline_start
+                .to_seconds()
+                .partial_cmp(&b.timeline_start.to_seconds())
+                .unwrap()
+        });
 
         let mut prev_end: Option<Timestamp> = None;
         for item in sorted_items {
@@ -403,7 +539,9 @@ pub fn validate_edl(edl: &Edl) -> Result<()> {
                 if item.timeline_start.to_seconds() < pe.to_seconds() {
                     return Err(FrameForgeError::InvalidEdl(format!(
                         "track {}: overlapping items {} and {}",
-                        track.name, item.id.0, prev_end.unwrap().value
+                        track.name,
+                        item.id.0,
+                        prev_end.unwrap().value
                     )));
                 }
             }
@@ -428,19 +566,25 @@ pub fn ripple_edit(track: &mut Track, after_time: Timestamp, delta_seconds: f64)
 
     for item in &mut track.items {
         if item.timeline_start.to_seconds() >= after_time.to_seconds() {
-            item.timeline_start = Timestamp::new(
-                (item.timeline_start.value as i64 + delta_ticks) as i64,
-                tb,
-            );
+            item.timeline_start = Timestamp::new(item.timeline_start.value + delta_ticks, tb);
         }
     }
 
     // Re-sort items after ripple
-    track.items.sort_by(|a, b| a.timeline_start.to_seconds().partial_cmp(&b.timeline_start.to_seconds()).unwrap());
+    track.items.sort_by(|a, b| {
+        a.timeline_start
+            .to_seconds()
+            .partial_cmp(&b.timeline_start.to_seconds())
+            .unwrap()
+    });
 }
 
 /// Insert a new item at a specific time, ripple-shifting subsequent items.
-pub fn insert_item_ripple(track: &mut Track, mut item: TimelineItem, at_time: Timestamp) -> Result<()> {
+pub fn insert_item_ripple(
+    track: &mut Track,
+    mut item: TimelineItem,
+    at_time: Timestamp,
+) -> Result<()> {
     if track.locked {
         return Err(FrameForgeError::InvalidEdl("Track is locked".into()));
     }
@@ -453,7 +597,12 @@ pub fn insert_item_ripple(track: &mut Track, mut item: TimelineItem, at_time: Ti
     ripple_edit(track, at_time, item_duration);
 
     track.items.push(item);
-    track.items.sort_by(|a, b| a.timeline_start.to_seconds().partial_cmp(&b.timeline_start.to_seconds()).unwrap());
+    track.items.sort_by(|a, b| {
+        a.timeline_start
+            .to_seconds()
+            .partial_cmp(&b.timeline_start.to_seconds())
+            .unwrap()
+    });
 
     Ok(())
 }
@@ -491,7 +640,8 @@ pub fn trim_item(
         return Err(FrameForgeError::InvalidEdl("Track is locked".into()));
     }
 
-    let item = track.item_by_id_mut(frameforge_core_types::ItemId(item_id))
+    let item = track
+        .item_by_id_mut(frameforge_core_types::ItemId(item_id))
         .ok_or_else(|| FrameForgeError::InvalidEdl("Item not found".into()))?;
 
     let old_start = item.timeline_start;
@@ -502,14 +652,17 @@ pub fn trim_item(
         // Adjust source range start
         let offset = start.to_seconds() - old_start.to_seconds();
         let source_start_seconds = item.source_range.start.to_seconds() + offset;
-        item.source_range.start = Timestamp::from_seconds(source_start_seconds, item.source_range.start.tb);
+        item.source_range.start =
+            Timestamp::from_seconds(source_start_seconds, item.source_range.start.tb);
         item.timeline_start = start;
     }
 
     if let Some(end) = new_end {
         // Adjust source range end
-        let source_end_seconds = item.source_range.start.to_seconds() + (end.to_seconds() - item.timeline_start.to_seconds());
-        item.source_range.end = Timestamp::from_seconds(source_end_seconds, item.source_range.end.tb);
+        let source_end_seconds = item.source_range.start.to_seconds()
+            + (end.to_seconds() - item.timeline_start.to_seconds());
+        item.source_range.end =
+            Timestamp::from_seconds(source_end_seconds, item.source_range.end.tb);
     }
 
     let new_duration = item.duration_seconds();
@@ -520,7 +673,12 @@ pub fn trim_item(
     }
 
     // Re-sort
-    track.items.sort_by(|a, b| a.timeline_start.to_seconds().partial_cmp(&b.timeline_start.to_seconds()).unwrap());
+    track.items.sort_by(|a, b| {
+        a.timeline_start
+            .to_seconds()
+            .partial_cmp(&b.timeline_start.to_seconds())
+            .unwrap()
+    });
 
     Ok(())
 }
@@ -529,8 +687,8 @@ pub fn trim_item(
 mod tests {
     use super::*;
     use frameforge_core_types::{
-        Clip, Container, Edl, ExportMode, ExportSettings, Segment, SourceId, TimeRange, Timebase,
-        Timestamp, Track, TrackKind, TimelineItem, ItemId,
+        Clip, Container, Edl, ExportMode, ExportSettings, ItemId, Segment, SourceId, TimeRange,
+        Timebase, TimelineItem, Timestamp, Track, TrackKind,
     };
 
     fn tb() -> Timebase {

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use frameforge_core_types::{FrameForgeError, Timebase, Timestamp};
+use frameforge_core_types::FrameForgeError;
 use frameforge_mpv_adapter::{MpvPlayer, TrackInfo as MpvTrackInfo};
 
 /// Serializable player state sent to the WebView on every change.
@@ -104,9 +104,7 @@ pub fn player_play_pause_inner(p: &mut MpvPlayer) {
 
 /// Seek to a position (seconds).
 pub fn player_seek_inner(p: &mut MpvPlayer, seconds: f64) {
-    let tb = Timebase::new(1, 1_000_000);
-    let ts = Timestamp::new((seconds * 1_000_000.0) as i64, tb);
-    p.seek(ts);
+    p.seek_absolute(seconds);
 }
 
 /// Set playback speed.

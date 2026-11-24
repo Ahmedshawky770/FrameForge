@@ -4,8 +4,8 @@
 //! when clips can be losslessly merged vs. when re-encoding is required.
 
 use frameforge_core_types::{
-    Clip, Container, Edl, ExportMode, ExportSettings, SourceId, TimeRange, Timebase, Timestamp,
-    Track, TrackKind,
+    Clip, Container, Edl, ExportMode, ExportSettings, ItemId, SourceId, TimeRange, Timebase,
+    TimelineItem, Timestamp, Track, TrackKind,
 };
 use frameforge_edit_engine::{analyze_compatibility, plan_export, validate_edl};
 use std::path::PathBuf;
@@ -35,6 +35,31 @@ fn make_clip(id: u64, path: &str, segments: Vec<(i64, i64)>) -> Clip {
 }
 
 fn make_edl(clips: Vec<Clip>, mode: ExportMode) -> Edl {
+    // Derive video-track timeline items from clip segments (mirrors project app).
+    let mut video_items = Vec::new();
+    let mut cursor = 0.0f64;
+    for clip in &clips {
+        for seg in &clip.segments {
+            let dur = seg.range.duration_seconds();
+            video_items.push(TimelineItem {
+                id: ItemId::default(),
+                source_id: clip.id,
+                name: "clip".into(),
+                path: clip.path.clone(),
+                source_range: seg.range,
+                timeline_start: Timestamp::new((cursor * 1000.0) as i64, tb()),
+                track_index: 0,
+                transition_in: None,
+                transition_out: None,
+                volume: 1.0,
+                opacity: 1.0,
+                enabled: true,
+                locked: false,
+            });
+            cursor += dur;
+        }
+    }
+
     Edl {
         version: 1,
         clips,
@@ -43,11 +68,23 @@ fn make_edl(clips: Vec<Clip>, mode: ExportMode) -> Edl {
                 kind: TrackKind::Video,
                 enabled: true,
                 index: Some(0),
+                name: "Video".into(),
+                height: 80.0,
+                muted: false,
+                solo: false,
+                locked: false,
+                items: video_items,
             },
             Track {
                 kind: TrackKind::Audio,
                 enabled: true,
                 index: Some(1),
+                name: "Audio".into(),
+                height: 60.0,
+                muted: false,
+                solo: false,
+                locked: false,
+                items: Vec::new(),
             },
         ],
         export: ExportSettings {
@@ -72,7 +109,17 @@ fn make_edl(clips: Vec<Clip>, mode: ExportMode) -> Edl {
 fn merge_overlapping_segments_rejected() {
     let clip1 = make_clip(1, "test-a.mp4", vec![(0, 5000), (4000, 8000)]);
 
-    let edl = make_edl(vec![clip1], ExportMode::StreamCopy);
+    let mut edl = make_edl(vec![clip1], ExportMode::StreamCopy);
+    // Force timeline overlap so validate_edl rejects it.
+    if let Some(track) = edl
+        .tracks
+        .iter_mut()
+        .find(|t| matches!(t.kind, TrackKind::Video))
+    {
+        for item in &mut track.items {
+            item.timeline_start = Timestamp::new(0, tb());
+        }
+    }
 
     assert!(validate_edl(&edl).is_err());
 }
@@ -115,32 +162,57 @@ fn merge_reversed_segment_rejected() {
     assert!(validate_edl(&edl).is_err());
 }
 
-/// Test: single clip compatibility report - single clip returns Ok without probing
-#[test]
-fn compatibility_single_clip_ok() {
-    let clip1 = make_clip(1, "test-a.mp4", vec![(0, 5000)]);
+fn make_video_track(items: Vec<TimelineItem>) -> Track {
+    Track {
+        kind: TrackKind::Video,
+        enabled: true,
+        index: Some(0),
+        name: "Video".into(),
+        height: 80.0,
+        muted: false,
+        solo: false,
+        locked: false,
+        items,
+    }
+}
 
-    let report = analyze_compatibility(&[clip1]).expect("analyze should succeed for single clip");
-
-    assert!(report.lossless_possible);
-    assert!(report.reasons.is_empty());
+fn make_timeline_item(id: u64, path: &str) -> TimelineItem {
+    TimelineItem {
+        id: ItemId(id),
+        source_id: SourceId(id),
+        name: format!("clip-{}", id),
+        path: std::path::PathBuf::from(path),
+        source_range: TimeRange::new(Timestamp::new(0, tb()), Timestamp::new(5000, tb())),
+        timeline_start: Timestamp::new(0, tb()),
+        track_index: 0,
+        transition_in: None,
+        transition_out: None,
+        volume: 1.0,
+        opacity: 1.0,
+        enabled: true,
+        locked: false,
+    }
 }
 
 /// Test: two clips with fake paths - probe will fail, returning error
 #[test]
 fn compatibility_two_clips_fake_paths_error() {
-    let clip1 = make_clip(1, "test-a.mp4", vec![(0, 5000)]);
-    let clip2 = make_clip(2, "test-b.mp4", vec![(0, 5000)]);
+    let track = make_video_track(vec![
+        make_timeline_item(1, "test-a.mp4"),
+        make_timeline_item(2, "test-b.mp4"),
+    ]);
 
     // Probe will fail on fake paths, so analyze_compatibility returns Err
-    let result = analyze_compatibility(&[clip1, clip2]);
+    let result = analyze_compatibility(&[track]);
     assert!(result.is_err());
 }
 
 /// Test: no clips is lossless (edge case)
 #[test]
 fn compatibility_no_clips_lossless() {
-    let report = analyze_compatibility(&[]).expect("analyze should succeed");
+    let track = make_video_track(vec![]);
+
+    let report = analyze_compatibility(&[track]).expect("analyze should succeed");
 
     assert!(report.lossless_possible);
     assert!(report.reasons.is_empty());

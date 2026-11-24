@@ -3,3 +3,14 @@
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
 test-media/test-video.mp4
+
+# Rust build artifacts
+target/
+# Node modules
+node_modules/
+# Frontend build output
+apps/tauri-app/dist/
+packages/media-player/dist/
+# Temp diagnostics
+semgrep-*.rules
+logo1.jpg

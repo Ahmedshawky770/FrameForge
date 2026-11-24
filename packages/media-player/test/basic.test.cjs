@@ -1,0 +1,11 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const dist = path.join(__dirname, '..', 'dist');
+assert.ok(fs.existsSync(path.join(dist, 'index.cjs.js')), 'cjs bundle exists');
+assert.ok(fs.existsSync(path.join(dist, 'index.esm.js')), 'esm bundle exists');
+assert.ok(fs.existsSync(path.join(dist, 'types', 'index.d.ts')), 'types exist');
+const cjs = fs.readFileSync(path.join(dist, 'index.cjs.js'), 'utf8');
+assert.ok(cjs.includes('MediaPlayerElement'), 'component exported');
+assert.ok(cjs.includes('detectCapabilities'), 'capability detect exported');
+console.log('basic tests passed');

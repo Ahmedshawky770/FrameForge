@@ -6,9 +6,13 @@ edition = "2021"
 [dependencies]
 frameforge-core-types = { path = "../core-types" }
 frameforge-edit-engine = { path = "../edit-engine" }
+frameforge-media-probe = { path = "../media-probe" }
 thiserror = { workspace = true }
 ffmpeg-next = { workspace = true }
 libc = "0.2"
 
 [lib]
 path = "src/lib.rs"
+
+[dev-dependencies]
+frameforge-edit-engine = { path = "../edit-engine" }

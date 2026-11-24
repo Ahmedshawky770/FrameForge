@@ -6,7 +6,9 @@ use frameforge_core_types::{
     TimeRange, Timebase, Timestamp, Track, TrackKind,
 };
 use frameforge_edit_engine::{plan_export, validate_edl};
-use frameforge_export_engine::{disk_space_free, ExportExecutor, StreamCopyExecutor};
+use frameforge_export_engine::{
+    disk_space_free, ExportExecutor, ReencodeExecutor, SmartRenderExecutor, StreamCopyExecutor,
+};
 use frameforge_hw_diagnostics::probe_hw;
 use serde_json::{from_str, to_string_pretty};
 use std::path::PathBuf;
@@ -141,16 +143,21 @@ fn run(cmd: Commands) -> Result<(), FrameForgeError> {
             let seg_pairs: Vec<(f64, f64)> = segments
                 .split_whitespace()
                 .map(|pair| {
-                    let parts: Vec<f64> = pair
-                        .split(',')
-                        .map(|s| s.parse::<f64>().expect("invalid number"))
-                        .collect();
+                    let parts: Vec<&str> = pair.split(',').collect();
                     if parts.len() != 2 {
-                        panic!("invalid segment format: {pair} (expected start,end)");
+                        return Err(FrameForgeError::Export(format!(
+                            "invalid segment format: {pair} (expected start,end)"
+                        )));
                     }
-                    (parts[0], parts[1])
+                    let start = parts[0]
+                        .parse::<f64>()
+                        .map_err(|e| FrameForgeError::Export(format!("invalid number: {e}")))?;
+                    let end = parts[1]
+                        .parse::<f64>()
+                        .map_err(|e| FrameForgeError::Export(format!("invalid number: {e}")))?;
+                    Ok((start, end))
                 })
-                .collect();
+                .collect::<Result<Vec<_>, _>>()?;
 
             if seg_pairs.is_empty() {
                 return Err(FrameForgeError::Export("no segments specified".into()));
@@ -272,16 +279,21 @@ fn run(cmd: Commands) -> Result<(), FrameForgeError> {
                     })?
                     .split_whitespace()
                     .map(|pair| {
-                        let parts: Vec<f64> = pair
-                            .split(',')
-                            .map(|s| s.parse::<f64>().expect("invalid number"))
-                            .collect();
+                        let parts: Vec<&str> = pair.split(',').collect();
                         if parts.len() != 2 {
-                            panic!("invalid segment format: {pair} (expected start,end)");
+                            return Err(FrameForgeError::Export(format!(
+                                "invalid segment format: {pair} (expected start,end)"
+                            )));
                         }
-                        (parts[0], parts[1])
+                        let start = parts[0]
+                            .parse::<f64>()
+                            .map_err(|e| FrameForgeError::Export(format!("invalid number: {e}")))?;
+                        let end = parts[1]
+                            .parse::<f64>()
+                            .map_err(|e| FrameForgeError::Export(format!("invalid number: {e}")))?;
+                        Ok((start, end))
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 if seg_pairs.is_empty() {
                     return Err(FrameForgeError::Export("no segments specified".into()));
@@ -362,11 +374,65 @@ fn run(cmd: Commands) -> Result<(), FrameForgeError> {
             }
             println!("Segments: {}", plan.segments.len());
 
-            // Run stream-copy export.
-            let mut executor = StreamCopyExecutor::new(edl.clips, output.clone());
+            // Choose the cheapest correct path:
+            //   1. all cuts keyframe-aligned -> pure stream copy
+            //   2. compatible inputs, cuts not aligned -> smart render
+            //   3. otherwise -> full re-encode
             let progress = |_p: f32| {};
             let cancel = frameforge_export_engine::CancelToken::new();
-            executor.run(&plan, &progress, &cancel)?;
+            let is_mp4 = matches!(
+                frameforge_export_engine::output_format_from_extension(&output),
+                Some("mp4") | Some("mov")
+            );
+            let is_mkv = matches!(
+                frameforge_export_engine::output_format_from_extension(&output),
+                Some("matroska")
+            );
+
+            if is_mp4 && plan.merge_plan.copy_compatible {
+                println!("Using smart rendering (copy GOPs + boundary re-encode)");
+                let mut executor = SmartRenderExecutor::new(
+                    edl.clips.clone(),
+                    output.clone(),
+                    "auto".into(),
+                    "fast".into(),
+                );
+                match executor.run(&plan, &progress, &cancel) {
+                    Ok(()) => {}
+                    Err(frameforge_core_types::FrameForgeError::SmartRenderUnsupported(reason)) => {
+                        println!("Smart rendering unsupported ({reason}); falling back to full re-encode");
+                        let mut fallback = SmartRenderExecutor::new(
+                            edl.clips.clone(),
+                            output.clone(),
+                            "auto".into(),
+                            "fast".into(),
+                        )
+                        .with_force_reencode(true);
+                        fallback.run(&plan, &progress, &cancel)?;
+                    }
+                    Err(e) => return Err(e),
+                }
+            } else if plan.merge_plan.lossless {
+                let mut executor = StreamCopyExecutor::new(edl.clips.clone(), output.clone());
+                executor.run(&plan, &progress, &cancel)?;
+            } else if is_mp4 || is_mkv {
+                let mut executor = SmartRenderExecutor::new(
+                    edl.clips.clone(),
+                    output.clone(),
+                    "auto".into(),
+                    "fast".into(),
+                )
+                .with_force_reencode(true);
+                executor.run(&plan, &progress, &cancel)?;
+            } else {
+                let mut executor = ReencodeExecutor::new(
+                    edl.clips.clone(),
+                    output.clone(),
+                    "auto".into(),
+                    "fast".into(),
+                );
+                executor.run(&plan, &progress, &cancel)?;
+            }
 
             println!("Export complete: {:?}", output);
             Ok(())

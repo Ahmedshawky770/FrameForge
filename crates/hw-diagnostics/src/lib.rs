@@ -1,7 +1,7 @@
 //! hw-diagnostics: detect VAAPI/NVENC, report active decoder/encoder/interop/copy-back.
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,74 +49,12 @@ pub fn probe_hw() -> Diagnostics {
     }
 }
 
-#[cfg(feature = "vaapi")]
 fn try_vaapi() -> Option<Diagnostics> {
-    use libva::{Display, VAProfile, VAEntrypoint};
-
-    let render_nodes = find_render_nodes();
-    for node in render_nodes {
-        if let Ok(display) = Display::drm(node) {
-            if let Ok(profiles) = display.query_config_profiles() {
-                let mut decode_codecs = Vec::new();
-                let mut encode_codecs = Vec::new();
-
-                for profile in profiles {
-                    if let Ok(entrypoints) = display.query_config_entrypoints(profile) {
-                        for entrypoint in entrypoints {
-                            match (profile, entrypoint) {
-                                (VAProfile::H264, VAEntrypoint::VLD) => decode_codecs.push("h264"),
-                                (VAProfile::HEVC, VAEntrypoint::VLD) => decode_codecs.push("hevc"),
-                                (VAProfile::VP9, VAEntrypoint::VLD) => decode_codecs.push("vp9"),
-                                (VAProfile::AV1, VAEntrypoint::VLD) => decode_codecs.push("av1"),
-                                (VAProfile::H264, VAEntrypoint::EncSlice) => encode_codecs.push("h264"),
-                                (VAProfile::HEVC, VAEntrypoint::EncSlice) => encode_codecs.push("hevc"),
-                                (VAProfile::VP9, VAEntrypoint::EncSlice) => encode_codecs.push("vp9"),
-                                (VAProfile::AV1, VAEntrypoint::EncSlice) => encode_codecs.push("av1"),
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-
-                if !decode_codecs.is_empty() || !encode_codecs.is_empty() {
-                    let driver_name = display.vendor_string().unwrap_or_default();
-                    let interop = if driver_name.contains("Intel") || driver_name.contains("iHD") {
-                        "drm"
-                    } else if driver_name.contains("AMD") || driver_name.contains("radeon") {
-                        "drm"
-                    } else {
-                        "drm"
-                    };
-
-                    let decoder = if decode_codecs.is_empty() {
-                        "none".into()
-                    } else {
-                        format!("vaapi:{}", decode_codecs.join(","))
-                    };
-                    let encoder = if encode_codecs.is_empty() {
-                        "none".into()
-                    } else {
-                        format!("vaapi:{}", encode_codecs.join(","))
-                    };
-
-                    return Some(Diagnostics {
-                        decoder,
-                        encoder,
-                        interop: interop.into(),
-                        copy_back: true,
-                        hw_rejected_reason: None,
-                    });
-                }
-            }
-        }
-    }
-
     try_vaapi_vainfo()
 }
 
-#[cfg(not(feature = "vaapi"))]
-fn try_vaapi() -> Option<Diagnostics> {
-    try_vaapi_vainfo()
+fn try_nvenc() -> Option<Diagnostics> {
+    try_nvenc_nvidia_smi()
 }
 
 fn try_vaapi_vainfo() -> Option<Diagnostics> {
@@ -188,7 +126,29 @@ fn try_vaapi_vainfo() -> Option<Diagnostics> {
     })
 }
 
-fn find_render_nodes() -> Vec<std::path::PathBuf> {
+fn try_nvenc_nvidia_smi() -> Option<Diagnostics> {
+    let output = Command::new("nvidia-smi")
+        .arg("--query-gpu=name")
+        .arg("--format=csv,noheader")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() {
+        return None;
+    }
+    Some(Diagnostics {
+        decoder: "nvdec".into(),
+        encoder: "nvenc".into(),
+        interop: "cuda".into(),
+        copy_back: true,
+        hw_rejected_reason: None,
+    })
+}
+
+fn find_render_nodes() -> Vec<PathBuf> {
     let mut nodes = Vec::new();
     let dri_path = Path::new("/dev/dri");
     if let Ok(entries) = std::fs::read_dir(dri_path) {
@@ -201,108 +161,6 @@ fn find_render_nodes() -> Vec<std::path::PathBuf> {
     }
     nodes.sort();
     nodes
-}
-
-#[cfg(feature = "nvenc")]
-fn try_nvenc() -> Option<Diagnostics> {
-    use nvml_wrapper::Nvml;
-
-    let nvml = Nvml::init().ok()?;
-    let device_count = nvml.device_count().ok()?;
-
-    for i in 0..device_count {
-        if let Ok(device) = nvml.device_by_index(i) {
-            let name = device.name().unwrap_or_default();
-
-            let mut decode_codecs = Vec::new();
-            let mut encode_codecs = Vec::new();
-
-            if let Ok(caps) = device.encoder_capabilities() {
-                for cap in caps {
-                    match cap.codec {
-                        nvml_wrapper::enum_wrappers::encoder::CodecType::H264 => encode_codecs.push("h264"),
-                        nvml_wrapper::enum_wrappers::encoder::CodecType::HEVC => encode_codecs.push("hevc"),
-                        nvml_wrapper::enum_wrappers::encoder::CodecType::AV1 => encode_codecs.push("av1"),
-                        _ => {}
-                    }
-                }
-            }
-
-            if let Ok(caps) = device.decoder_capabilities() {
-                for cap in caps {
-                    match cap.codec {
-                        nvml_wrapper::enum_wrappers::decoder::CodecType::H264 => decode_codecs.push("h264"),
-                        nvml_wrapper::enum_wrappers::decoder::CodecType::HEVC => decode_codecs.push("hevc"),
-                        nvml_wrapper::enum_wrappers::decoder::CodecType::VP9 => decode_codecs.push("vp9"),
-                        nvml_wrapper::enum_wrappers::decoder::CodecType::AV1 => decode_codecs.push("av1"),
-                        _ => {}
-                    }
-                }
-            }
-
-            if !decode_codecs.is_empty() || !encode_codecs.is_empty() {
-                let decoder = if decode_codecs.is_empty() {
-                    "none".into()
-                } else {
-                    format!("nvdec:{}", decode_codecs.join(","))
-                };
-                let encoder = if encode_codecs.is_empty() {
-                    "none".into()
-                } else {
-                    format!("nvenc:{}", encode_codecs.join(","))
-                };
-
-                return Some(Diagnostics {
-                    decoder,
-                    encoder,
-                    interop: "cuda".into(),
-                    copy_back: true,
-                    hw_rejected_reason: None,
-                });
-            }
-        }
-    }
-
-    try_nvenc_nvidia_smi()
-}
-
-#[cfg(not(feature = "nvenc"))]
-fn try_nvenc() -> Option<Diagnostics> {
-    try_nvenc_nvidia_smi()
-}
-
-fn try_nvenc_nvidia_smi() -> Option<Diagnostics> {
-    let output = Command::new("nvidia-smi")
-        .args(["--query-gpu=name", "--format=csv,noheader"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if stdout.is_empty() {
-        return None;
-    }
-
-    let output2 = Command::new("nvidia-smi")
-        .args(["--query-gpu=encoder.stats.sessionCount,decoder.stats.sessionCount", "--format=csv,noheader"])
-        .output()
-        .ok()?;
-    let _ = String::from_utf8_lossy(&output2.stdout);
-
-    let decode_codecs = vec!["h264", "hevc", "vp9", "av1"];
-    let encode_codecs = vec!["h264", "hevc", "av1"];
-
-    let decoder = format!("nvdec:{}", decode_codecs.join(","));
-    let encoder = format!("nvenc:{}", encode_codecs.join(","));
-
-    Some(Diagnostics {
-        decoder,
-        encoder,
-        interop: "cuda".into(),
-        copy_back: true,
-        hw_rejected_reason: None,
-    })
 }
 
 #[cfg(test)]

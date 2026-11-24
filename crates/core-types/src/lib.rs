@@ -1,12 +1,10 @@
-//! Core types: rational timebase, timestamps, EDL, errors.
-//! Pure Rust — no C dependencies. Compiles headless on any platform.
+//! Core types for FrameForge. Pure Rust — no C dependencies.
 
 use num_rational::Ratio;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 pub use std::path::PathBuf;
 use thiserror::Error;
-use uuid::Uuid;
 
 /// A rational number (num/den) used for timebases and frame rates.
 pub type Rational = Ratio<i64>;
@@ -23,7 +21,11 @@ impl Timebase {
         Self { num, den }
     }
     pub fn as_f64(self) -> f64 {
-        self.num as f64 / self.den as f64
+        if self.den == 0 {
+            0.0
+        } else {
+            self.num as f64 / self.den as f64
+        }
     }
 }
 
@@ -108,7 +110,7 @@ pub struct ItemId(pub u64);
 
 impl ItemId {
     pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4().as_u128() as u64)
+        Self(uuid::Uuid::new_v4().as_u64_pair().0)
     }
 }
 
@@ -139,7 +141,10 @@ pub enum Transition {
     /// Dip to color (usually black)
     DipToColor { duration: f64, color: String },
     /// Push transition (slide)
-    Push { duration: f64, direction: PushDirection },
+    Push {
+        duration: f64,
+        direction: PushDirection,
+    },
     /// Wipe transition
     Wipe { duration: f64, angle: f64 },
 }
@@ -183,7 +188,10 @@ impl TimelineItem {
     /// Get the timeline end position (timeline_start + source_range duration)
     pub fn timeline_end(&self) -> Timestamp {
         let dur = self.source_range.duration_seconds();
-        Timestamp::from_seconds(self.timeline_start.to_seconds() + dur, self.timeline_start.tb)
+        Timestamp::from_seconds(
+            self.timeline_start.to_seconds() + dur,
+            self.timeline_start.tb,
+        )
     }
 
     /// Get duration in seconds
@@ -243,7 +251,12 @@ impl Track {
     /// Get items sorted by timeline position
     pub fn sorted_items(&self) -> Vec<&TimelineItem> {
         let mut items: Vec<_> = self.items.iter().collect();
-        items.sort_by(|a, b| a.timeline_start.to_seconds().partial_cmp(&b.timeline_start.to_seconds()).unwrap());
+        items.sort_by(|a, b| {
+            a.timeline_start
+                .to_seconds()
+                .partial_cmp(&b.timeline_start.to_seconds())
+                .unwrap()
+        });
         items
     }
 
@@ -297,6 +310,25 @@ pub struct ExportSettings {
     pub audio_sample_rate: Option<u32>,
     pub audio_channels: Option<u32>,
     pub destination: PathBuf,
+}
+
+impl Default for ExportSettings {
+    fn default() -> Self {
+        Self {
+            mode: ExportMode::StreamCopy,
+            preset: "fast".into(),
+            container: Container::Mp4,
+            vcodec: None,
+            acodec: None,
+            width: Some(1920),
+            height: Some(1080),
+            fps_num: None,
+            fps_den: None,
+            audio_sample_rate: None,
+            audio_channels: None,
+            destination: PathBuf::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -367,6 +399,8 @@ pub enum FrameForgeError {
     Seek(String),
     #[error("Export error: {0}")]
     Export(String),
+    #[error("Smart render unsupported: {0}")]
+    SmartRenderUnsupported(String),
     #[error("Compatibility error: {0}")]
     Compatibility(String),
     #[error("Invalid EDL: {0}")]
@@ -400,21 +434,5 @@ mod tests {
     fn edl_default_version() {
         let edl = Edl::default();
         assert_eq!(edl.version, 1);
-    }
-}
-
-/// FFmpeg initialization guard — ensures `ffmpeg_next::init()` is called exactly once.
-pub mod ffmpeg_init {
-    use std::sync::Once;
-
-    static INIT: Once = Once::new();
-
-    /// Initialize FFmpeg. Safe to call multiple times; only the first call has effect.
-    pub fn init() {
-        INIT.call_once(|| {
-            // SAFETY: ffmpeg_next::init() is idempotent and must be called before any other
-            // ffmpeg_next functions. The Once guard ensures it runs exactly once per process.
-            let _ = ffmpeg_next::init();
-        });
     }
 }

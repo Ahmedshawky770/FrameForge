@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tauri::Emitter;
 
 /// Handle to a libmpv player instance.
 pub struct MpvPlayer {
@@ -18,6 +19,16 @@ pub struct MpvPlayer {
     wid: Option<u64>,
     /// Last error message for diagnostics
     last_error: Arc<std::sync::Mutex<String>>,
+    /// Last loaded media path (for windowed playback)
+    current_path: Option<String>,
+    /// Tauri app handle for emitting events
+    app_handle: Arc<std::sync::Mutex<Option<tauri::AppHandle>>>,
+    /// Whether a preview window sequence is active
+    window_active: Arc<AtomicBool>,
+    /// Generation counter for stale event filtering
+    window_generation: Arc<std::sync::Mutex<u64>>,
+    /// mpv event context (transmuted to 'static)
+    event_ctx: Arc<std::sync::Mutex<Option<libmpv::events::EventContext<'static>>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,11 +86,72 @@ impl MpvPlayer {
         // Prevent mpv from capturing terminal input
         let _ = inner.set_property("input-terminal", "no");
 
+        // Event context for EndFile events (windowed playback)
+        let event_ctx_inner = inner.create_event_context();
+        let _ = event_ctx_inner.enable_event(libmpv::events::mpv_event_id::EndFile);
+        let event_ctx_inner = unsafe {
+            std::mem::transmute::<
+                libmpv::events::EventContext<'_>,
+                libmpv::events::EventContext<'static>,
+            >(event_ctx_inner)
+        };
+        let event_ctx = Arc::new(std::sync::Mutex::new(Some(event_ctx_inner)));
+        let app_handle: Arc<std::sync::Mutex<Option<tauri::AppHandle>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let window_active = Arc::new(AtomicBool::new(false));
+        let window_generation = Arc::new(std::sync::Mutex::new(0u64));
+
+        // Background thread: emit Tauri event on EndFile (eof) when a window is active
+        let ctx_t = event_ctx.clone();
+        let active_t = window_active.clone();
+        let gen_t = window_generation.clone();
+        let app_t = app_handle.clone();
+        std::thread::spawn(move || {
+            use std::sync::atomic::Ordering;
+            loop {
+                let mut guard = match ctx_t.lock() {
+                    Ok(g) => g,
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        continue;
+                    }
+                };
+                let ev = match guard.as_mut() {
+                    Some(e) => e,
+                    None => {
+                        drop(guard);
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        continue;
+                    }
+                };
+                match ev.wait_event(0.5) {
+                    Some(Ok(libmpv::events::Event::EndFile(reason))) => {
+                        drop(guard);
+                        if reason == 0 && active_t.load(Ordering::SeqCst) {
+                            active_t.store(false, Ordering::SeqCst);
+                            let g = *gen_t.lock().unwrap();
+                            if let Some(app) = app_t.lock().unwrap().clone() {
+                                let _ = app.emit("preview-window-ended", g);
+                            }
+                        }
+                    }
+                    _ => {
+                        drop(guard);
+                    }
+                }
+            }
+        });
+
         Ok(Self {
             inner,
             running: Arc::new(AtomicBool::new(false)),
             wid: None,
             last_error: Arc::new(std::sync::Mutex::new(String::new())),
+            current_path: None,
+            app_handle,
+            window_active,
+            window_generation,
+            event_ctx,
         })
     }
 
@@ -103,7 +175,8 @@ impl MpvPlayer {
         let _ = self.inner.set_property("fullscreen", "no");
 
         // Load with proper error handling
-        let result = self.inner
+        let result = self
+            .inner
             .playlist_load_files(&[(path_str.as_str(), FileState::Replace, None)])
             .map_err(|e| {
                 let err_msg = format!("mpv loadfile failed: {e}");
@@ -114,11 +187,13 @@ impl MpvPlayer {
             });
 
         if result.is_ok() {
+            self.current_path = Some(path_str.clone());
             self.running.store(true, Ordering::SeqCst);
 
             // Verify video/audio tracks are loaded - poll with timeout since loading is async
             let mut tracks_loaded = false;
-            for _ in 0..50 { // Up to 5 seconds (50 * 100ms)
+            for _ in 0..50 {
+                // Up to 5 seconds (50 * 100ms)
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 if let Ok(tracks) = self.get_tracks() {
                     let has_video = tracks.iter().any(|t| t.kind == "video");
@@ -129,7 +204,7 @@ impl MpvPlayer {
                     }
                 }
             }
-            
+
             if !tracks_loaded {
                 if let Ok(mut err) = self.last_error.lock() {
                     *err = "No video or audio tracks found in file after timeout - file may be corrupt, unsupported format, or failed to load".to_string();
@@ -145,7 +220,10 @@ impl MpvPlayer {
 
     /// Get the last error message
     pub fn last_error(&self) -> String {
-        self.last_error.lock().map(|e| e.clone()).unwrap_or_default()
+        self.last_error
+            .lock()
+            .map(|e| e.clone())
+            .unwrap_or_default()
     }
 
     /// Enable/disable hardware decoding
@@ -219,12 +297,16 @@ impl MpvPlayer {
     }
 
     pub fn set_geometry(&mut self, x: i32, y: i32, width: i32, height: i32) {
-        let _ = self.inner.set_property("geometry", format!("{}x{}+{}+{}", width, height, x, y));
+        let _ = self
+            .inner
+            .set_property("geometry", format!("{}x{}+{}+{}", width, height, x, y));
     }
 
     /// Set video geometry (position and size) using mpv's geometry property.
     pub fn set_video_geometry(&mut self, x: i32, y: i32, width: i32, height: i32) {
-        let _ = self.inner.set_property("geometry", format!("{}x{}+{}+{}", width, height, x, y));
+        let _ = self
+            .inner
+            .set_property("geometry", format!("{}x{}+{}+{}", width, height, x, y));
         let _ = self.inner.set_property("keep-aspect", "yes");
         let _ = self.inner.set_property("panscan", "0.0");
     }
@@ -267,7 +349,7 @@ impl MpvPlayer {
                             "title" => title = val.to_str().map(|s| s.to_string()),
                             "lang" => lang = val.to_str().map(|s| s.to_string()),
                             "selected" => selected = val.to_bool().unwrap_or(false),
-                            "id" => index = val.to_i64().unwrap_or(-1) as u32,
+                            "id" => index = val.to_i64().unwrap_or(0).max(0) as u32,
                             _ => {}
                         }
                     }
@@ -358,15 +440,21 @@ impl MpvPlayer {
     pub fn get_mpv_window_id(&self) -> Option<u64> {
         // mpv doesn't directly expose its window ID, but we can try to get it
         // from the vo-window property if available
-        self.inner.get_property::<i64>("vo-window").ok().map(|w| w as u64)
+        self.inner
+            .get_property::<i64>("vo-window")
+            .ok()
+            .map(|w| w as u64)
     }
 
     /// Set mpv window position and size (for external window management)
     pub fn set_window_geometry(&mut self, x: i32, y: i32, width: u32, height: u32) {
-        let _ = self.inner.set_property("geometry", format!("{}x{}+{}+{}", width, height, x, y));
+        let _ = self
+            .inner
+            .set_property("geometry", format!("{}x{}+{}+{}", width, height, x, y));
     }
 
     /// Observe a property value (e.g. "time-pos", "duration", "pause").
+    /// Retained for API compatibility; libmpv observers are not wired here.
     pub fn observe_property(
         &mut self,
         _name: &str,
@@ -389,7 +477,10 @@ impl MpvPlayer {
 
     /// Get current volume (0.0 - 1.0)
     pub fn volume(&self) -> Option<f64> {
-        self.inner.get_property::<f64>("volume").ok().map(|v| v / 100.0)
+        self.inner
+            .get_property::<f64>("volume")
+            .ok()
+            .map(|v| v / 100.0)
     }
 
     /// Get current playback speed
@@ -399,9 +490,9 @@ impl MpvPlayer {
 
     /// Execute an mpv command
     pub fn command(&mut self, name: &str, args: &[&str]) -> Result<()> {
-        self.inner.command(name, args).map_err(|e| {
-            FrameForgeError::Probe(format!("mpv command {} failed: {}", name, e))
-        })
+        self.inner
+            .command(name, args)
+            .map_err(|e| FrameForgeError::Probe(format!("mpv command {} failed: {}", name, e)))
     }
 
     /// Set an mpv property
@@ -409,9 +500,9 @@ impl MpvPlayer {
     where
         T: libmpv::SetData,
     {
-        self.inner.set_property(name, value).map_err(|e| {
-            FrameForgeError::Probe(format!("Failed to set property {}: {}", name, e))
-        })
+        self.inner
+            .set_property(name, value)
+            .map_err(|e| FrameForgeError::Probe(format!("Failed to set property {}: {}", name, e)))
     }
 
     /// Generic property getter for any mpv property
@@ -419,13 +510,51 @@ impl MpvPlayer {
     where
         T: libmpv::GetData,
     {
-        self.inner.get_property(name).map_err(|e| {
-            FrameForgeError::Probe(format!("Failed to get property {}: {}", name, e))
-        })
+        self.inner
+            .get_property(name)
+            .map_err(|e| FrameForgeError::Probe(format!("Failed to get property {}: {}", name, e)))
     }
 
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
+    }
+
+    /// Set the Tauri app handle for event emission.
+    pub fn set_app_handle(&mut self, app: tauri::AppHandle) {
+        if let Ok(mut h) = self.app_handle.lock() {
+            *h = Some(app);
+        }
+    }
+
+    /// Play a single time window [start, end] from the loaded media.
+    /// mpv stops at `end` (EOF) and emits EndFile; the background thread
+    /// then emits "preview-window-ended" with the returned generation.
+    pub fn play_window(&mut self, start: f64, end: f64) -> Result<u64> {
+        use std::sync::atomic::Ordering;
+        let path = self
+            .current_path
+            .clone()
+            .ok_or_else(|| FrameForgeError::Probe("no media loaded".to_string()))?;
+        let mut gen = self.window_generation.lock().unwrap();
+        *gen += 1;
+        let g = *gen;
+        drop(gen);
+        self.window_active.store(true, Ordering::SeqCst);
+        let opts = format!("start={},end={}", start, end);
+        self.inner
+            .command("loadfile", &[&path, "replace", &opts])
+            .map_err(|e| FrameForgeError::Probe(format!("loadfile window failed: {e}")))?;
+        let _ = self.inner.set_property("pause", false);
+        Ok(g)
+    }
+
+    /// Cancel any active preview window.
+    pub fn clear_window(&mut self) {
+        use std::sync::atomic::Ordering;
+        self.window_active.store(false, Ordering::SeqCst);
+        if let Ok(mut g) = self.window_generation.lock() {
+            *g += 1;
+        }
     }
 }
 

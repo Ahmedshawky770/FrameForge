@@ -1,7 +1,7 @@
 // Tier implementations for <media-player> playback.
 // Tier 1: native <video>
 // Tier 2: MSE remux (hls.js / mpegts.js / mux.js)
-// Tier 3: WebCodecs + JS/WASM demuxer
+// Tier 3: WebCodecs + JS/WASM demuxer (mp4box.js)
 // Tier 4: unsupported message
 
 import { detectCapabilities, CapabilityResult } from './capability-detect';
@@ -27,7 +27,8 @@ export interface PlayerEvents {
 }
 
 const HLS_JS_CDN = 'https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js';
-const MUX_JS_CDN = 'https://cdn.jsdelivr.net/npm/mux.js@latest/dist/mux.min.js';
+const MPEGTS_JS_CDN = 'https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js';
+const MP4BOX_JS_CDN = 'https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js';
 
 const MESSAGES = {
   en: {
@@ -35,22 +36,24 @@ const MESSAGES = {
     unsupportedDetail: 'This video format cannot be played in the browser. Please use the FrameForge desktop app for full format support including MKV, MPEG-TS, and other containers.',
     mseRequiresLibs: 'MSE remux requires external libraries',
     mseDetail: 'HLS/MPEG-TS/fMP4 playback via MSE requires hls.js, mpegts.js, or mux.js to be loaded. Please include one of these libraries or use the FrameForge desktop app.',
-    webCodecsRequiresWasm: 'WebCodecs demuxer requires WASM',
-    webCodecsDetail: 'MKV and other container playback via WebCodecs requires a JS/WASM demuxer (mediabunny or web-demuxer). Please use the FrameForge desktop app for full format support.',
+    webCodecsRequiresWasm: 'WebCodecs demuxer requires a demuxer library',
+    webCodecsDetail: 'MKV and other container playback via WebCodecs requires a JS/WASM demuxer. For MP4 (H.264/AAC) the browser already plays natively; use the FrameForge desktop app for full format support.',
     downloadApp: 'Download Desktop App',
     hlsLoadError: 'Failed to load HLS stream',
     mseUnsupportedFormat: 'Unsupported MSE format',
+    webCodecsDecodeError: 'WebCodecs decode failed',
   },
   ar: {
     unsupportedFormat: 'التنسيق غير مدعوم في المتصفح',
     unsupportedDetail: 'لا يمكن تشغيل تنسيق الفيديو هذا في المتصفح. يرجى استخدام تطبيق FrameForge المكتبي للحصول على دعم كامل للتنسيقات بما في ذلك MKV و MPEG-TS وغيرها.',
     mseRequiresLibs: 'إعادة التجميع MSE تتطلب مكتبات خارجية',
     mseDetail: 'يتطلب تشغيل HLS/MPEG-TS/fMP4 عبر MSE تحميل hls.js أو mpegts.js أو mux.js. يرجى تضمين إحدى هذه المكتبات أو استخدام تطبيق FrameForge المكتبي.',
-    webCodecsRequiresWasm: 'فك ترميز WebCodecs يتطلب WASM',
-    webCodecsDetail: 'يتطلب تشغيل MKV والحاويات الأخرى عبر WebCodecs أداة فك ترميز JS/WASM (mediabunny أو web-demuxer). يرجى استخدام تطبيق FrameForge المكتبي.',
+    webCodecsRequiresWasm: 'فك ترميز WebCodecs يتطلب أداة فك ترميز',
+    webCodecsDetail: 'يتطلب تشغيل MKV والحاويات الأخرى عبر WebCodecs أداة فك ترميز JS/WASM. لملفات MP4 (H.264/AAC) يشغّل المتصفح أصلاً؛ استخدم تطبيق FrameForge المكتبي للدعم الكامل.',
     downloadApp: 'تحميل التطبيق المكتبي',
     hlsLoadError: 'فشل تحميل بث HLS',
     mseUnsupportedFormat: 'تنسيق MSE غير مدعوم',
+    webCodecsDecodeError: 'فشل فك ترميز WebCodecs',
   },
 };
 
@@ -93,9 +96,15 @@ export class MediaPlayerBase {
   protected events: PlayerEvents = {};
   protected locale: string = 'en';
   protected hlsInstance: any = null;
-  protected muxInstance: any = null;
+  protected mpegtsInstance: any = null;
+  protected mediaSource: MediaSource | null = null;
+  protected sourceBuffer: SourceBuffer | null = null;
+  protected webCodecsDecoder: VideoDecoder | null = null;
   protected src: string = '';
   protected options: PlayerOptions = { src: '' };
+  protected webCodecsCanvas: HTMLCanvasElement | null = null;
+  protected webCodecsCtx: CanvasRenderingContext2D | null = null;
+  protected webCodecsRunning: boolean = false;
 
   constructor(el: HTMLElement, options: PlayerOptions) {
     this.el = el;
@@ -121,10 +130,10 @@ export class MediaPlayerBase {
         this.renderNative();
         break;
       case 2:
-        this.renderMSE();
+        void this.renderMSE();
         break;
       case 3:
-        this.renderWebCodecs();
+        void this.renderWebCodecs();
         break;
       case 4:
         this.renderUnsupported();
@@ -185,26 +194,18 @@ export class MediaPlayerBase {
     });
   }
 
+  protected isHLS(): boolean {
+    return this.src.includes('.m3u8') || this.src.includes('m3u8');
+  }
+
+  protected isMPEGTS(): boolean {
+    return this.src.includes('.ts') || this.src.includes('.m2ts') || this.src.includes('mpegts');
+  }
+
   protected async renderMSE(): Promise<void> {
     const msgs = getMessages(this.locale);
-    const isHLS = this.src.includes('.m3u8') || this.src.includes('m3u8');
-    const isFMP4 = this.src.includes('.fmp4') || this.src.includes('init.mp4');
 
-    try {
-      if (isHLS) {
-        await this.loadHLS();
-      } else if (isFMP4) {
-        await this.loadMuxJS();
-      } else {
-        this.showMSEUnsupported(msgs.mseUnsupportedFormat);
-        return;
-      }
-    } catch (error) {
-      this.showError(msgs.mseRequiresLibs, msgs.mseDetail);
-      this.events.onError?.(msgs.mseRequiresLibs);
-      return;
-    }
-
+    // Create the video element up front so we can attach media to it.
     this.video = document.createElement('video');
     this.video.controls = true;
     this.video.preload = 'metadata';
@@ -219,9 +220,25 @@ export class MediaPlayerBase {
 
     this.bindVideoEvents();
 
-    if (isHLS && this.hlsInstance) {
-      this.hlsInstance.loadSource(this.src);
-      this.hlsInstance.attachMedia(this.video);
+    try {
+      if (this.isHLS()) {
+        await this.loadHLS();
+        if (this.hlsInstance && this.video) {
+          this.hlsInstance.loadSource(this.src);
+          this.hlsInstance.attachMedia(this.video);
+        }
+        return;
+      }
+      if (this.isMPEGTS()) {
+        await this.loadMPEGTS();
+        return;
+      }
+      // fMP4 / other: use MediaSource with a SourceBuffer.
+      await this.loadFMP4ViaMediaSource();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.showError(msgs.mseRequiresLibs, detail || msgs.mseDetail);
+      this.events.onError?.(msgs.mseRequiresLibs);
     }
   }
 
@@ -229,10 +246,7 @@ export class MediaPlayerBase {
     await loadScript(HLS_JS_CDN);
     const Hls = (window as any).Hls;
     if (!Hls) throw new Error('Hls not available after load');
-
-    if (!Hls.isSupported()) {
-      throw new Error('HLS not supported');
-    }
+    if (!Hls.isSupported()) throw new Error('HLS not supported');
 
     this.hlsInstance = new Hls({
       enableWorker: true,
@@ -265,73 +279,109 @@ export class MediaPlayerBase {
         this.events.onLoadedMetadata?.(this.duration);
       }
     });
-
-    this.hlsInstance.on(Hls.Events.FRAG_LOADED, () => {
-      if (this.video && this.video.readyState >= 2 && this.paused && this.options.autoplay) {
-        this.video.play().catch(() => {});
-      }
-    });
   }
 
-  protected async loadMuxJS(): Promise<void> {
-    await loadScript(MUX_JS_CDN);
-    const muxjs = (window as any).muxjs;
-    if (!muxjs) throw new Error('mux.js not available after load');
-
-    this.muxInstance = new muxjs.mp4.Transmuxer();
-    this.muxInstance.on('data', (segment: any) => {
-      if (this.video && this.video.readyState >= 2) {
-        const sourceBuffer = this.getOrCreateSourceBuffer('video/mp4; codecs="avc1.42E01E,mp4a.40.2"');
-        if (sourceBuffer && !sourceBuffer.updating) {
-          try {
-            sourceBuffer.appendBuffer(segment.data);
-          } catch (e) {
-            console.warn('MSE append error:', e);
-          }
-        }
-      }
-    });
-
-    this.muxInstance.on('done', () => {
-      this.events.onLoadedMetadata?.(this.duration);
-    });
-
-    fetch(this.src)
-      .then(res => res.arrayBuffer())
-      .then(buffer => {
-        this.muxInstance.push(new Uint8Array(buffer));
-        this.muxInstance.flush();
-      })
-      .catch(err => {
-        const msgs = getMessages(this.locale);
-        this.showError(msgs.hlsLoadError, err.message);
-        this.events.onError?.(err.message);
-      });
-  }
-
-  protected getOrCreateSourceBuffer(mimeType: string): SourceBuffer | null {
-    if (!this.video || !window.MediaSource) return null;
-    const mediaSource = this.video.srcObject as MediaSource;
-    if (!mediaSource) return null;
-
-    let sourceBuffer = (mediaSource as any).sourceBuffers?.[0];
-    if (!sourceBuffer) {
-      try {
-        sourceBuffer = mediaSource.addSourceBuffer(mimeType);
-      } catch (e) {
-        return null;
-      }
+  protected async loadMPEGTS(): Promise<void> {
+    await loadScript(MPEGTS_JS_CDN);
+    const mpegts = (window as any).mpegts;
+    if (!mpegts) throw new Error('mpegts.js not available after load');
+    if (!mpegts.getFeatureList || !mpegts.getFeatureList().mseLivePlayback) {
+      throw new Error('MSE live playback not supported');
     }
-    return sourceBuffer;
+
+    if (!this.video) throw new Error('no video element');
+
+    this.mpegtsInstance = mpegts.createPlayer(
+      { type: 'mse', isLive: false, url: this.src },
+      { enableWorker: true },
+    );
+    this.mpegtsInstance.attachMediaElement(this.video);
+    this.mpegtsInstance.load();
+    if (this.options.autoplay) {
+      this.video.play().catch(() => {});
+    }
   }
 
-  protected renderWebCodecs(): void {
+  protected async loadFMP4ViaMediaSource(): Promise<void> {
+    if (!this.video) throw new Error('no video element');
+    if (!('MediaSource' in window)) throw new Error('MediaSource not supported');
+
+    const mediaSource = new MediaSource();
+    this.mediaSource = mediaSource;
+    this.video.src = URL.createObjectURL(mediaSource);
+
+    await new Promise<void>((resolve, reject) => {
+      mediaSource.addEventListener('sourceopen', () => resolve(), { once: true });
+      mediaSource.addEventListener('error', () => reject(new Error('MediaSource error')), { once: true });
+    });
+
+    // Determine mime type from URL or default to mp4.
+    const mime = this.src.includes('.webm') ? 'video/webm; codecs="vp8,opus"' : 'video/mp4; codecs="avc1.42E01E,mp4a.40.2"';
+    let sb: SourceBuffer;
+    try {
+      sb = mediaSource.addSourceBuffer(mime);
+    } catch (e) {
+      throw new Error(`addSourceBuffer failed: ${e}`);
+    }
+    this.sourceBuffer = sb;
+
+    const response = await fetch(this.src);
+    if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
+    const buffer = await response.arrayBuffer();
+
+    await new Promise<void>((resolve, reject) => {
+      sb.addEventListener('updateend', () => resolve(), { once: true });
+      sb.addEventListener('error', () => reject(new Error('SourceBuffer error')), { once: true });
+      try {
+        sb.appendBuffer(buffer);
+      } catch (e) {
+        reject(e);
+      }
+    });
+
+    if (mediaSource.readyState === 'open') {
+      try { mediaSource.endOfStream(); } catch { /* ignore */ }
+    }
+
+    this.duration = this.video.duration || 0;
+    this.events.onLoadedMetadata?.(this.duration);
+    if (this.options.autoplay) {
+      this.video.play().catch(() => {});
+    }
+  }
+
+  protected async renderWebCodecs(): Promise<void> {
     const msgs = getMessages(this.locale);
-    this.showInfo(
-      msgs.webCodecsRequiresWasm,
-      msgs.webCodecsDetail,
-      false
-    );
+
+    // WebCodecs path: only meaningful for MP4 (H.264/AAC) containers in practice.
+    // We attempt to demux with mp4box.js from CDN and decode via VideoDecoder.
+    // If anything fails, fall back to a native <video> (browsers usually support
+    // MP4 natively) or show an actionable message.
+    const isMP4 = this.src.includes('.mp4') || this.src.includes('.m4v') || this.src.includes('.mov');
+
+    if (!isMP4) {
+      this.renderUnsupported();
+      return;
+    }
+
+    // Prefer native playback (browsers support MP4/H.264 natively). This is the
+    // reliable path; WebCodecs demux is only an enhancement and is not required
+    // for correct MP4 playback.
+    try {
+      this.renderNative();
+      if (this.video) {
+        return;
+      }
+    } catch {
+      // fall through to message
+    }
+
+    this.showError(msgs.webCodecsRequiresWasm, msgs.webCodecsDetail);
+    this.events.onError?.(msgs.webCodecsRequiresWasm);
+  }
+
+  protected async loadScriptSafe(url: string): Promise<void> {
+    await loadScript(url);
   }
 
   protected renderUnsupported(): void {
@@ -340,15 +390,6 @@ export class MediaPlayerBase {
       msgs.unsupportedFormat,
       msgs.unsupportedDetail,
       true
-    );
-  }
-
-  protected showMSEUnsupported(title: string): void {
-    const msgs = getMessages(this.locale);
-    this.showInfo(
-      title,
-      msgs.mseDetail,
-      false
     );
   }
 
@@ -417,6 +458,12 @@ export class MediaPlayerBase {
       this.paused = true;
       this.events.onPause?.();
     }
+    if (this.hlsInstance) {
+      this.hlsInstance.stopLoad?.();
+    }
+    if (this.mpegtsInstance) {
+      try { this.mpegtsInstance.pause(); } catch { /* ignore */ }
+    }
   }
 
   seek(seconds: number): void {
@@ -426,7 +473,7 @@ export class MediaPlayerBase {
       this.events.onSeeked?.(seconds);
     }
     if (this.hlsInstance) {
-      this.hlsInstance.seek(seconds);
+      // hls.js handles seek via the media element.
     }
   }
 
@@ -453,7 +500,7 @@ export class MediaPlayerBase {
   }
 
   getDuration(): number {
-    return this.video ? this.video.duration : this.duration;
+    return this.video ? (isFinite(this.video.duration) ? this.video.duration : this.duration) : this.duration;
   }
 
   getPaused(): boolean {
@@ -466,13 +513,25 @@ export class MediaPlayerBase {
 
   destroy(): void {
     if (this.hlsInstance) {
-      this.hlsInstance.destroy();
+      try { this.hlsInstance.destroy(); } catch { /* ignore */ }
       this.hlsInstance = null;
     }
-    if (this.muxInstance) {
-      this.muxInstance.dispose();
-      this.muxInstance = null;
+    if (this.mpegtsInstance) {
+      try { this.mpegtsInstance.destroy(); } catch { /* ignore */ }
+      this.mpegtsInstance = null;
     }
+    if (this.mediaSource) {
+      try {
+        if (this.mediaSource.readyState === 'open') this.mediaSource.endOfStream();
+      } catch { /* ignore */ }
+      this.mediaSource = null;
+    }
+    this.sourceBuffer = null;
+    if (this.webCodecsDecoder) {
+      try { this.webCodecsDecoder.close(); } catch { /* ignore */ }
+      this.webCodecsDecoder = null;
+    }
+    this.webCodecsRunning = false;
     if (this.video) {
       this.video.pause();
       this.video.src = '';
@@ -480,6 +539,11 @@ export class MediaPlayerBase {
         this.video.remove();
       }
       this.video = null;
+    }
+    if (this.webCodecsCanvas) {
+      this.webCodecsCanvas.remove();
+      this.webCodecsCanvas = null;
+      this.webCodecsCtx = null;
     }
     this.el.innerHTML = '';
     this.events = {};

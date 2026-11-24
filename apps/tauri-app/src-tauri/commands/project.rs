@@ -353,7 +353,7 @@ pub async fn project_export(
             }
         };
 
-        if plan.merge_plan.lossless && !plan.merge_plan.copy_compatible {
+        if plan.merge_plan.lossless {
             let mut executor = StreamCopyExecutor::new(clips, dest.clone());
             return executor
                 .run(&plan, &progress, &cancel_token)
@@ -381,9 +381,9 @@ pub async fn project_export(
                 target_fps_num,
                 target_fps_den,
                 None,
-            target_audio_rate,
-            target_audio_channels,
-        );
+                target_audio_rate,
+                target_audio_channels,
+            );
             return match executor.run(&plan, &progress, &cancel_token) {
                 Ok(()) => Ok(()),
                 Err(frameforge_core_types::FrameForgeError::SmartRenderUnsupported(reason)) => {
@@ -391,12 +391,29 @@ pub async fn project_export(
                         "smart render unsupported ({reason}); falling back to full re-encode"
                     );
                     clear_last_encoder_report();
-                    let mut fallback = SmartRenderExecutor::new(
-                        clips,
-                        dest.clone(),
-                        encoder_pref,
-                        quality_preset,
-                    )
+                    let mut fallback =
+                        SmartRenderExecutor::new(clips, dest.clone(), encoder_pref, quality_preset)
+                            .with_normalization(
+                                target_width,
+                                target_height,
+                                target_fps_num,
+                                target_fps_den,
+                                None,
+                                target_audio_rate,
+                                target_audio_channels,
+                            )
+                            .with_force_reencode(true);
+                    fallback
+                        .run(&plan, &progress, &cancel_token)
+                        .map_err(|e| e.to_string())
+                }
+                Err(e) => Err(e.to_string()),
+            };
+        }
+
+        if is_mp4 || is_mkv {
+            let mut executor =
+                SmartRenderExecutor::new(clips, dest.clone(), encoder_pref, quality_preset)
                     .with_normalization(
                         target_width,
                         target_height,
@@ -407,21 +424,12 @@ pub async fn project_export(
                         target_audio_channels,
                     )
                     .with_force_reencode(true);
-                    fallback
-                        .run(&plan, &progress, &cancel_token)
-                        .map_err(|e| e.to_string())
-                }
-                Err(e) => Err(e.to_string()),
-            };
+            return executor
+                .run(&plan, &progress, &cancel_token)
+                .map_err(|e| e.to_string());
         }
 
-        if is_mp4 || is_mkv {
-            let mut executor = SmartRenderExecutor::new(
-                clips,
-                dest.clone(),
-                encoder_pref,
-                quality_preset,
-            )
+        let mut executor = ReencodeExecutor::new(clips, dest.clone(), encoder_pref, quality_preset)
             .with_normalization(
                 target_width,
                 target_height,
@@ -430,28 +438,7 @@ pub async fn project_export(
                 None,
                 target_audio_rate,
                 target_audio_channels,
-            )
-            .with_force_reencode(true);
-            return executor
-                .run(&plan, &progress, &cancel_token)
-                .map_err(|e| e.to_string());
-        }
-
-        let mut executor = ReencodeExecutor::new(
-            clips,
-            dest.clone(),
-            encoder_pref,
-            quality_preset,
-        )
-        .with_normalization(
-            target_width,
-            target_height,
-            target_fps_num,
-            target_fps_den,
-            None,
-            target_audio_rate,
-            target_audio_channels,
-        );
+            );
 
         executor
             .run(&plan, &progress, &cancel_token)

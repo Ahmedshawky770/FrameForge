@@ -6,14 +6,6 @@ edition = "2021"
 [dependencies]
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-libva = { version = "0.1", optional = true }
-nvml-wrapper = { version = "0.13", optional = true }
-
-[features]
-default = []
-vaapi = ["dep:libva"]
-nvenc = ["dep:nvml-wrapper"]
-full = ["vaapi", "nvenc"]
 
 [lib]
 path = "src/lib.rs"
