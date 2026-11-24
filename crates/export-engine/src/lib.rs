@@ -1733,6 +1733,8 @@ fn remux_segment(
     let seg_base_dts: Vec<i64> = ctx.base_dts_offsets.to_vec();
     let mut last_final_pts: Vec<Option<i64>> = vec![None; ctx.base_offsets.len()];
     let mut last_final_dts: Vec<Option<i64>> = vec![None; ctx.base_offsets.len()];
+    let mut last_final_pts_dur: Vec<i64> = vec![0; ctx.base_offsets.len()];
+    let mut last_final_dts_dur: Vec<i64> = vec![0; ctx.base_offsets.len()];
 
     for (stream, mut packet) in ctx.ictx.packets() {
         if cancel.is_cancelled() {
@@ -1752,8 +1754,20 @@ fn remux_segment(
         let ist_tb = stream.time_base();
         let tb_sec = ist_tb.0 as f64 / ist_tb.1 as f64;
 
-        let pkt_pts = packet.pts().unwrap_or(0);
-        let pkt_seconds = pkt_pts as f64 * tb_sec - start_offset_seconds;
+        let stream_start_offset = {
+            let st = stream.start_time();
+            if st == i64::MIN {
+                0.0
+            } else {
+                st as f64 * tb_sec
+            }
+        };
+
+        let pkt_pts_raw = packet.pts();
+        let pkt_dts_raw = packet.dts();
+        let pkt_pts = pkt_pts_raw.or(pkt_dts_raw).unwrap_or(0);
+        let pkt_dts = pkt_dts_raw.or(pkt_pts_raw).unwrap_or(pkt_pts);
+        let pkt_seconds = pkt_pts as f64 * tb_sec - stream_start_offset;
 
         if pkt_seconds < seg_start_seconds - 1e-9 {
             continue;
@@ -1776,23 +1790,29 @@ fn remux_segment(
             continue;
         }
 
-        // Use the segment start (in input timebase units) as the reference for
-        // both PTS and DTS.  Deriving it from the first packet is unsafe because
-        // the first packet after a seek may be a B-frame whose PTS is not the
-        // segment start, which corrupts every subsequent timestamp.
-        // Capture per-stream first-packet DTS (for B-frame-heavy GOPs the first
-        // packet in decode order has the smallest DTS, which may precede the
-        // segment start).
-        if ctx.stream_seg_start_dts[ist_index as usize].is_none() {
-            ctx.stream_seg_start_dts[ist_index as usize] = packet.dts().or(Some(pkt_pts));
+        // Capture per-stream origins from the first in-range packet of this
+        // segment independently for PTS and DTS.  Using the source segment
+        // start for PTS while using the first packet's DTS for DTS (the old
+        // approach) mixed two different origins and produced DTS > PTS for
+        // B-frame GOPs, freezing playback after a deleted range.  Each stream
+        // now has its own origin for PTS and DTS, preserving their difference.
+        // Use a single common origin (the first in-range packet's DTS) for
+        // both PTS and DTS so their difference is preserved while DTS starts
+        // at zero (required by MP4/MOV).  Using different origins (the old
+        // code used the source segment start for PTS and the first packet's
+        // DTS for DTS) skewed DTS ahead of PTS for B-frame GOPs.
+        let origin = pkt_dts;
+        if ctx.stream_seg_start_pts[ist_index as usize].is_none() {
+            ctx.stream_seg_start_pts[ist_index as usize] = Some(origin);
         }
-        let seg_start_pts = ((start_offset_seconds + seg_start_seconds) / tb_sec).round() as i64;
-        let stream_start_pts = seg_start_pts;
-        let stream_start_dts = ctx.stream_seg_start_dts[ist_index as usize].unwrap_or(pkt_pts);
+        if ctx.stream_seg_start_dts[ist_index as usize].is_none() {
+            ctx.stream_seg_start_dts[ist_index as usize] = Some(origin);
+        }
+        let stream_origin = ctx.stream_seg_start_dts[ist_index as usize].unwrap_or(origin);
 
         // Calculate relative PTS/DTS in input timebase units (segment starts at 0).
-        let relative_pts = pkt_pts - stream_start_pts;
-        let relative_dts = packet.dts().unwrap_or(pkt_pts) - stream_start_dts;
+        let relative_pts = pkt_pts - stream_origin;
+        let relative_dts = pkt_dts - stream_origin;
 
         packet.set_pts(Some(relative_pts));
         packet.set_dts(Some(relative_dts));
@@ -1841,6 +1861,20 @@ fn remux_segment(
         packet.set_pts(Some(adjusted_pts));
         packet.set_dts(Some(adjusted_dts));
 
+        let pkt_dur_out = packet.duration();
+        // Track the duration of the packet that carries the max PTS/DTS so the
+        // next segment's base offset advances by the real written duration.
+        if last_final_pts[ost_index as usize].is_none()
+            || adjusted_pts >= last_final_pts[ost_index as usize].unwrap_or(adjusted_pts)
+        {
+            last_final_pts_dur[ost_index as usize] = if pkt_dur_out > 0 { pkt_dur_out } else { 1 };
+        }
+        if last_final_dts[ost_index as usize].is_none()
+            || adjusted_dts >= last_final_dts[ost_index as usize].unwrap_or(adjusted_dts)
+        {
+            last_final_dts_dur[ost_index as usize] = if pkt_dur_out > 0 { pkt_dur_out } else { 1 };
+        }
+
         stream_written[ost_index as usize] = true;
         // Track the maximum PTS/DTS seen in this segment so the next segment
         // starts strictly after all packets of this one (handles B-frames and
@@ -1848,16 +1882,10 @@ fn remux_segment(
         let final_pts = packet.pts().unwrap_or(adjusted_pts);
         let final_dts = packet.dts().unwrap_or(adjusted_dts);
 
-        let prev_pts = last_final_pts[ost_index as usize].unwrap_or(final_pts);
-        if final_pts > prev_pts {
-            last_final_pts[ost_index as usize] = Some(final_pts);
-        } else if last_final_pts[ost_index as usize].is_none() {
+        if last_final_pts[ost_index as usize].is_none() || final_pts > last_final_pts[ost_index as usize].unwrap_or(final_pts) {
             last_final_pts[ost_index as usize] = Some(final_pts);
         }
-        let prev_dts = last_final_dts[ost_index as usize].unwrap_or(final_dts);
-        if final_dts > prev_dts {
-            last_final_dts[ost_index as usize] = Some(final_dts);
-        } else if last_final_dts[ost_index as usize].is_none() {
+        if last_final_dts[ost_index as usize].is_none() || final_dts > last_final_dts[ost_index as usize].unwrap_or(final_dts) {
             last_final_dts[ost_index as usize] = Some(final_dts);
         }
 
@@ -1877,7 +1905,8 @@ fn remux_segment(
         .take(ctx.base_offsets.len())
     {
         if let Some(p) = p {
-            ctx.base_offsets[i] = p + 1;
+            let dur = last_final_pts_dur[i].max(1);
+            ctx.base_offsets[i] = p + dur;
         }
     }
     for (i, d) in last_final_dts
@@ -1886,16 +1915,8 @@ fn remux_segment(
         .take(ctx.base_dts_offsets.len())
     {
         if let Some(d) = d {
-            ctx.base_dts_offsets[i] = d + 1;
-            eprintln!(
-                "DEBUG seg end: stream {} last_final_dts={} new_base={}",
-                i, d, ctx.base_dts_offsets[i]
-            );
-        } else {
-            eprintln!(
-                "DEBUG seg end: stream {} last_final_dts=None base unchanged={}",
-                i, ctx.base_dts_offsets[i]
-            );
+            let dur = last_final_dts_dur[i].max(1);
+            ctx.base_dts_offsets[i] = d + dur;
         }
     }
 
@@ -1923,9 +1944,9 @@ mod tests {
         let _ = std::fs::remove_file(&dest);
 
         let result = atomic_write(&dest, |path, _fmt| {
-            let mut f = std::fs::File::create(path).map_err(|e| FrameForgeError::Io(e))?;
+            let mut f = std::fs::File::create(path).map_err(FrameForgeError::Io)?;
             f.write_all(b"test data")
-                .map_err(|e| FrameForgeError::Io(e))?;
+                .map_err(FrameForgeError::Io)?;
             Ok(())
         });
 

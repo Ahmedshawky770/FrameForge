@@ -1396,12 +1396,14 @@ fn copy_part(
             break;
         }
 
+        let origin = pkt.dts().unwrap_or(pkt_pts);
         if stream_start_pts.is_none() {
-            stream_start_pts = Some(pkt_pts);
-            stream_start_dts = Some(pkt.dts().unwrap_or(pkt_pts));
+            stream_start_pts = Some(origin);
+            stream_start_dts = Some(origin);
         }
-        let relative_pts = pkt_pts - stream_start_pts.unwrap();
-        let relative_dts = pkt.dts().unwrap_or(pkt_pts) - stream_start_dts.unwrap();
+        let stream_origin = stream_start_dts.unwrap_or(origin);
+        let relative_pts = pkt_pts - stream_origin;
+        let relative_dts = pkt.dts().unwrap_or(pkt_pts) - stream_origin;
 
         pkt.set_pts(Some(relative_pts));
         pkt.set_dts(Some(relative_dts));
@@ -1525,12 +1527,14 @@ fn copy_audio_stream(
             break;
         }
 
+        let origin = pkt.dts().unwrap_or(pkt_pts);
         if stream_start_pts.is_none() {
-            stream_start_pts = Some(pkt_pts);
-            stream_start_dts = Some(pkt.dts().unwrap_or(pkt_pts));
+            stream_start_pts = Some(origin);
+            stream_start_dts = Some(origin);
         }
-        let relative_pts = pkt_pts - stream_start_pts.unwrap();
-        let relative_dts = pkt.dts().unwrap_or(pkt_pts) - stream_start_dts.unwrap();
+        let stream_origin = stream_start_dts.unwrap_or(origin);
+        let relative_pts = pkt_pts - stream_origin;
+        let relative_dts = pkt.dts().unwrap_or(pkt_pts) - stream_origin;
 
         pkt.set_pts(Some(relative_pts));
         pkt.set_dts(Some(relative_dts));
