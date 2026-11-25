@@ -245,6 +245,7 @@ fn probe_stream(stream: &ffmpeg_next::Stream) -> StreamInfo {
 /// Probe a media file and return stream + format info.
 pub fn probe(path: &Path) -> Result<ProbeResult, FrameForgeError> {
     ffmpeg_next::init().map_err(|e| FrameForgeError::Probe(format!("ffmpeg init failed: {e}")))?;
+    ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Fatal);
 
     let ictx = ffmpeg_next::format::input(path)
         .map_err(|e| FrameForgeError::Probe(format!("format::input failed: {e}")))?;
@@ -365,6 +366,7 @@ pub fn build_keyframe_index_cached(
 /// limit, which keeps enough entries for both start- and end-snapping.
 fn scan_keyframes(path: &Path, limit: Option<f64>) -> Result<KeyframeIndex, FrameForgeError> {
     ffmpeg_next::init().map_err(|e| FrameForgeError::Probe(format!("ffmpeg init failed: {e}")))?;
+    ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Fatal);
 
     let mut ictx = ffmpeg_next::format::input(path)
         .map_err(|e| FrameForgeError::Probe(format!("format::input failed: {e}")))?;

@@ -91,6 +91,7 @@ fn main() {
             project::open_file_dialog,
             project::open_video_files_dialog,
             project::project_delete_ranges,
+            project::project_export_delete_ranges,
             project::media_probe_duration,
         ])
         .setup(|app| tauri::async_runtime::block_on(async move { setup::setup(app).await }))

@@ -656,7 +656,7 @@ pub async fn project_delete_ranges(
             },
         ],
         export: ImportExportSettings {
-            mode: "stream-copy".into(),
+            mode: "reencode".into(),
             preset: "fast".into(),
             container: "mp4".into(),
             vcodec: None,
@@ -672,6 +672,111 @@ pub async fn project_delete_ranges(
     };
 
     serde_json::to_string(&edl).map_err(|e| format!("serialize edl: {e}"))
+}
+
+/// Export a video with deleted ranges removed using ffmpeg's concat demuxer.
+///
+/// This bypasses the custom packet-by-packet remuxer (which is prone to
+/// timestamp/container quirks on B-frame sources) and delegates timestamp
+/// rebasing to ffmpeg, which is robust and fast (stream copy).
+#[command]
+pub async fn project_export_delete_ranges(
+    source_path: String,
+    duration: f64,
+    delete_ranges: Vec<(f64, f64)>,
+    output_path: String,
+) -> Result<(), String> {
+    if source_path.is_empty() {
+        return Err("source_path is empty — load a video first".into());
+    }
+    if duration <= 0.0 {
+        return Err("duration must be greater than zero".into());
+    }
+
+    // Sort and merge overlapping delete ranges.
+    let mut ranges: Vec<(f64, f64)> = delete_ranges
+        .iter()
+        .filter(|(s, e)| e > s && *s >= 0.0 && *e <= duration)
+        .cloned()
+        .collect();
+    ranges.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (s, e) in ranges {
+        if let Some(last) = merged.last_mut() {
+            if s <= last.1 {
+                last.1 = last.1.max(e);
+                continue;
+            }
+        }
+        merged.push((s, e));
+    }
+
+    // Build keep intervals.
+    let mut keeps: Vec<(f64, f64)> = Vec::new();
+    let mut cursor = 0.0f64;
+    for (s, e) in &merged {
+        if *s > cursor {
+            keeps.push((cursor, *s));
+        }
+        cursor = cursor.max(*e);
+    }
+    if cursor < duration {
+        keeps.push((cursor, duration));
+    }
+    if keeps.is_empty() {
+        return Err("Export failed: all ranges deleted — nothing remains to export".into());
+    }
+
+    // Write concat demuxer list.
+    let list_path = std::env::temp_dir().join(format!(
+        "frameforge_concat_{}.txt",
+        std::process::id()
+    ));
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&list_path)
+            .map_err(|e| format!("create concat list failed: {e}"))?;
+        for (s, e) in &keeps {
+            let escaped = source_path.replace('\'', "'\\''");
+            writeln!(f, "file '{}'", escaped)
+                .map_err(|e| format!("write concat list failed: {e}"))?;
+            writeln!(f, "inpoint {:.6}", s)
+                .map_err(|e| format!("write concat list failed: {e}"))?;
+            writeln!(f, "outpoint {:.6}", e)
+                .map_err(|e| format!("write concat list failed: {e}"))?;
+        }
+    }
+
+    let output = output_path.clone();
+    let list = list_path.clone();
+    let status = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("ffmpeg")
+            .arg("-y")
+            .arg("-v")
+            .arg("error")
+            .arg("-f")
+            .arg("concat")
+            .arg("-safe")
+            .arg("0")
+            .arg("-i")
+            .arg(&list)
+            .arg("-c")
+            .arg("copy")
+            .arg("-movflags")
+            .arg("+faststart")
+            .arg(&output)
+            .status()
+    })
+    .await
+    .map_err(|e| format!("export task failed: {e}"))?
+    .map_err(|e| format!("ffmpeg failed to start: {e}"))?;
+
+    let _ = std::fs::remove_file(&list_path);
+
+    if !status.success() {
+        return Err(format!("ffmpeg concat export failed with status {status}"));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

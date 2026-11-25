@@ -65,6 +65,7 @@ pub fn gen_ts_video(
     start_time: f64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     ffmpeg_next::init()?;
+    ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Fatal);
     let mut octx = ffmpeg_next::format::output_as(path, "mpegts")?;
 
     let codec = ffmpeg_next::codec::encoder::find(ffmpeg_next::codec::Id::H264)
@@ -181,6 +182,7 @@ fn gen_impl(
     x264_params: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     ffmpeg_next::init()?;
+    ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Fatal);
     let mut octx = format::output_as(path, "mp4")?;
 
     let codec = codec::encoder::find(codec::Id::H264).ok_or("no H.264 encoder")?;

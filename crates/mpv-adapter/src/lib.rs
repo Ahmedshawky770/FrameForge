@@ -62,8 +62,8 @@ impl MpvPlayer {
         // Audio output - try pipewire, then pulse, then alsa, then auto
         let _ = inner.set_property("ao", "pipewire,pulse,alsa,auto");
 
-        // Enable verbose logging for debugging
-        let _ = inner.set_property("msg-level", "all=info");
+        // Keep mpv diagnostics but suppress noisy ffmpeg decoder warnings
+        let _ = inner.set_property("msg-level", "all=warn,ffmpeg=fatal");
 
         // Ensure mpv doesn't create its own window when we want embedding
         let _ = inner.set_property("fullscreen", "no");

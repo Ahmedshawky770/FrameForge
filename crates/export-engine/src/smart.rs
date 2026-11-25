@@ -488,6 +488,7 @@ impl ExportExecutor for SmartRenderExecutor {
     ) -> Result<()> {
         ffmpeg_next::init()
             .map_err(|e| FrameForgeError::Export(format!("ffmpeg init failed: {e}")))?;
+        ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Fatal);
 
         if plan.segments.is_empty() {
             return Err(FrameForgeError::Export("no segments in plan".into()));
@@ -1038,9 +1039,7 @@ fn smart_render_multiple_files(
         octx.write_header_with(opts)
             .map_err(|e| FrameForgeError::Export(format!("write_header failed: {e}")))?;
     } else if render_is_mp4 {
-        let mut opts = Dictionary::new();
-        opts.set("movflags", "negative_cts_offsets");
-        octx.write_header_with(opts)
+        octx.write_header()
             .map_err(|e| FrameForgeError::Export(format!("write_header failed: {e}")))?;
     } else {
         octx.write_header()
@@ -1304,8 +1303,14 @@ fn remux_copy(input: &Path, output: &Path, fmt: &str, timescale: Option<i64>) ->
         .arg(input)
         .arg("-c")
         .arg("copy")
+        .arg("-use_editlist")
+        .arg("0")
         .arg("-movflags")
-        .arg("negative_cts_offsets");
+        .arg("+faststart")
+        .arg("-fflags")
+        .arg("+genpts")
+        .arg("-avoid_negative_ts")
+        .arg("make_zero");
     if let Some(ts) = timescale {
         cmd.arg("-video_track_timescale").arg(ts.to_string());
     }

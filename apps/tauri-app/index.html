@@ -3924,19 +3924,12 @@ const elsPlaceholder = document.getElementById('placeholder');
            if (!path) return;
            setExportBusy(true);
            const ranges = deleteRanges.map(r => [r.start, r.end]);
-           const edlJson = await invoke('project_delete_ranges', {
+           await invoke('project_export_delete_ranges', {
              sourcePath: currentFile,
              duration: duration || 0,
              deleteRanges: ranges,
-           });
-           startExportPoll();
-           await invoke('project_export', {
-             edlJson: edlJson,
              outputPath: path,
-             encoderPref: 'auto',
-             qualityPreset: 'fast',
            });
-           stopExportPoll();
            const name = path.split('/').pop() || path.split('\\').pop();
            const encoder = await exportEncoderLabel();
            toast(t('msg.export-complete', { name }) + (encoder ? ' \u2022 ' + encoder : ''));

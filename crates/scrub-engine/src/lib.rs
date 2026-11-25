@@ -112,6 +112,7 @@ impl ScrubSession {
 
         ffmpeg_next::init()
             .map_err(|e| FrameForgeError::Probe(format!("ffmpeg init failed: {e}")))?;
+        ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Fatal);
 
         let ictx = ffmpeg_next::format::input(path)
             .map_err(|e| FrameForgeError::Probe(format!("format::input failed: {e}")))?;

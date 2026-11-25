@@ -128,6 +128,7 @@ impl ExportExecutor for StreamCopyExecutor {
     ) -> Result<()> {
         ffmpeg_next::init()
             .map_err(|e| FrameForgeError::Probe(format!("ffmpeg init failed: {e}")))?;
+        ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Fatal);
 
         if plan.segments.is_empty() {
             return Err(FrameForgeError::Export("no segments to export".into()));
@@ -239,6 +240,7 @@ fn remux_multiple_files(
     octx.set_metadata(first_ictx.metadata().to_owned());
     let mut hdr_opts = ffmpeg_next::Dictionary::new();
     hdr_opts.set("avoid_negative_ts", "make_non_negative");
+    hdr_opts.set("use_editlist", "0");
     octx.write_header_with(hdr_opts)
         .map_err(|e| FrameForgeError::Export(format!("write_header failed: {e}")))?;
 
@@ -374,6 +376,7 @@ impl ExportExecutor for ReencodeExecutor {
     ) -> Result<()> {
         ffmpeg_next::init()
             .map_err(|e| FrameForgeError::Probe(format!("ffmpeg init failed: {e}")))?;
+        ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Fatal);
 
         if plan.segments.is_empty() {
             return Err(FrameForgeError::Export("no segments to export".into()));
@@ -1852,7 +1855,13 @@ fn remux_segment(
         }
         ctx.last_dts[ost_index as usize] = Some(adjusted_dts);
 
-        // Do not force PTS >= DTS: B-frames legitimately have PTS < DTS.
+        // B-frames require DTS <= PTS (non-negative composition offset).
+        // Clamp the decode timestamp down to the presentation timestamp so
+        // the MP4 muxer never emits negative CTS, which some players (mpv)
+        // mishandle and stall on.
+        if adjusted_dts > adjusted_pts {
+            adjusted_dts = adjusted_pts;
+        }
         // Never let PTS fall below the segment base.
         if adjusted_pts < base_pts {
             adjusted_pts = base_pts;
