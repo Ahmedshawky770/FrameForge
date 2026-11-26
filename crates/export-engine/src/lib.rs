@@ -1624,7 +1624,7 @@ where
     // Ensure the destination directory exists.
     if let Some(parent) = destination.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
-            std::fs::create_dir_all(parent).map_err(|e| FrameForgeError::Io(e))?;
+            std::fs::create_dir_all(parent).map_err(FrameForgeError::Io)?;
         }
     }
 
@@ -1900,10 +1900,14 @@ fn remux_segment(
         let final_pts = packet.pts().unwrap_or(adjusted_pts);
         let final_dts = packet.dts().unwrap_or(adjusted_dts);
 
-        if last_final_pts[ost_index as usize].is_none() || final_pts > last_final_pts[ost_index as usize].unwrap_or(final_pts) {
+        if last_final_pts[ost_index as usize].is_none()
+            || final_pts > last_final_pts[ost_index as usize].unwrap_or(final_pts)
+        {
             last_final_pts[ost_index as usize] = Some(final_pts);
         }
-        if last_final_dts[ost_index as usize].is_none() || final_dts > last_final_dts[ost_index as usize].unwrap_or(final_dts) {
+        if last_final_dts[ost_index as usize].is_none()
+            || final_dts > last_final_dts[ost_index as usize].unwrap_or(final_dts)
+        {
             last_final_dts[ost_index as usize] = Some(final_dts);
         }
 
@@ -1969,8 +1973,7 @@ mod tests {
 
         let result = atomic_write(&dest, |path, _fmt| {
             let mut f = std::fs::File::create(path).map_err(FrameForgeError::Io)?;
-            f.write_all(b"test data")
-                .map_err(FrameForgeError::Io)?;
+            f.write_all(b"test data").map_err(FrameForgeError::Io)?;
             Ok(())
         });
 

@@ -158,7 +158,6 @@ impl Drop for AudioFifo {
 /// Check whether the first video packet at or after `start` is a real IDR
 /// (NAL type 5).  Returns false for open-GOP sources where the keyframe is
 /// an I-frame that references a previous GOP.
-
 /// Convert an Annex B H.264 byte stream to AVCC (length-prefixed) NAL units.
 fn annexb_to_avcc(data: &[u8]) -> Vec<u8> {
     let mut starts = Vec::new();
@@ -196,18 +195,19 @@ fn annexb_to_avcc(data: &[u8]) -> Vec<u8> {
     out
 }
 
+#[allow(dead_code)]
 fn parse_pps_debug(pps: &[u8]) -> (u32, u32, u32, u32, u32) {
     let rbsp = nal_rbsp(&pps[1..]);
     let mut r = BitReader::new(&rbsp);
     let pps_id = r.ue().unwrap_or(0);
     let sps_id = r.ue().unwrap_or(0);
     let entropy = r.u(1).unwrap_or(0);
-    let bottom = r.u(1).unwrap_or(0);
-    let slice_groups = r.ue().unwrap_or(0);
+    let _bottom = r.u(1).unwrap_or(0);
+    let _slice_groups = r.ue().unwrap_or(0);
     let ref_l0 = r.ue().unwrap_or(0);
-    let ref_l1 = r.ue().unwrap_or(0);
+    let _ref_l1 = r.ue().unwrap_or(0);
     let wp = r.u(1).unwrap_or(0);
-    let wbp = r.u(2).unwrap_or(0);
+    let _wbp = r.u(2).unwrap_or(0);
     (pps_id, sps_id, entropy, ref_l0, wp)
 }
 pub(crate) fn first_packet_is_idr(
@@ -294,7 +294,7 @@ pub(crate) fn first_packet_is_idr(
 /// to the next keyframe; the GOP that contains `end` is re-encoded from the
 /// last keyframe before `end` to `end`.  Everything in between is copied.
 pub(crate) fn split_segment(index: &KeyframeIndex, start: f64, end: f64) -> Vec<Part> {
-    if !(end > start) {
+    if end <= start {
         return Vec::new();
     }
 
@@ -824,10 +824,8 @@ fn smart_render_multiple_files(
     let use_avc3 = !force_reencode && render_is_mp4 && !compat && allow_avc3;
     if use_avc3 {
         encoder_params.global_header = false;
-    } else if render_is_mp4 {
-        encoder_params.global_header = true;
     } else {
-        encoder_params.global_header = false;
+        encoder_params.global_header = render_is_mp4;
     }
 
     let mut octx = format::output_as(&render_path, render_fmt)
@@ -1474,7 +1472,7 @@ fn copy_audio_stream(
     octx: &mut format::context::Output,
     audio_ist_index: usize,
     audio_ost_index: usize,
-    video_start_offset_seconds: f64,
+    _video_start_offset_seconds: f64,
     seg_start: f64,
     seg_end: f64,
     base_pts: &mut i64,
@@ -1732,7 +1730,6 @@ fn reencode_part(
                 ensure_pts_gte_dts(&mut out_pkt);
 
                 let ost_extra = octx.stream(video_ost_index).map(|s| s.parameters());
-                let ost_extra = octx.stream(video_ost_index).map(|s| s.parameters());
                 let avcc_mode = ost_extra
                     .as_ref()
                     .map(|p| {
@@ -1794,7 +1791,6 @@ fn reencode_part(
         out_pkt.set_stream(video_ost_index);
         out_pkt.set_position(-1);
         ensure_pts_gte_dts(&mut out_pkt);
-        let ost_extra = octx.stream(video_ost_index).map(|s| s.parameters());
         let ost_extra = octx.stream(video_ost_index).map(|s| s.parameters());
         let avcc_mode = ost_extra
             .as_ref()
@@ -2185,6 +2181,7 @@ unsafe fn parameters_extradata(ptr: *const ffmpeg_next::ffi::AVCodecParameters) 
 /// length-prefixed NAL units (SPS/PPS) used inside `avc3` samples.
 /// Split an H.264 extradata blob (AVCDecoderConfigurationRecord or Annex B)
 /// into its SPS and PPS NAL units.
+#[allow(clippy::type_complexity)]
 fn extract_parameter_sets(extradata: &[u8]) -> Option<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
     let mut sps = Vec::new();
     let mut pps = Vec::new();
@@ -2301,10 +2298,11 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    #[allow(dead_code)]
     fn se(&mut self) -> Option<i32> {
         let k = self.ue()?;
         Some(if k % 2 == 1 {
-            ((k + 1) / 2) as i32
+            k.div_ceil(2) as i32
         } else {
             -((k / 2) as i32)
         })
@@ -2334,6 +2332,7 @@ fn nal_rbsp(nal: &[u8]) -> Vec<u8> {
 /// the VUI only carries display/timing hints and does not affect slice
 /// parsing.  This lets smart rendering use the encoder's `avcC` for copied
 /// packets whose SPS differs only in VUI.
+#[allow(dead_code)]
 fn sps_core_bits(nal: &[u8]) -> Option<Vec<u8>> {
     if nal.len() < 4 {
         return None;
@@ -2401,6 +2400,7 @@ fn sps_core_bits(nal: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
+#[allow(dead_code)]
 fn pps_compatible(a: &[u8], b: &[u8]) -> bool {
     fn parse(nal: &[u8]) -> Option<(u32, u32, u32)> {
         if nal.len() < 2 {
@@ -2442,8 +2442,10 @@ fn parse_sps_info(nal: &[u8]) -> Option<(u8, u8)> {
     Some((profile, level))
 }
 
+#[allow(dead_code)]
 fn sps_decode_compatible(a: &[u8], b: &[u8]) -> bool {
     // Parse both SPS into a minimal set of fields.
+    #[allow(clippy::type_complexity)]
     fn parse(nal: &[u8]) -> Option<(u8, u8, u32, u32, u8, bool, bool, bool)> {
         let rbsp = nal_rbsp(&nal[1..]);
         let mut r = BitReader::new(&rbsp);
@@ -2503,15 +2505,15 @@ fn sps_decode_compatible(a: &[u8], b: &[u8]) -> bool {
         }
         let direct_8x8 = r.u(1)? == 1;
         let crop = r.u(1)? == 1;
-        let mut crop_l = 0u32;
-        let mut crop_r = 0u32;
-        let mut crop_t = 0u32;
-        let mut crop_b = 0u32;
+        let mut _crop_l = 0u32;
+        let mut _crop_r = 0u32;
+        let mut _crop_t = 0u32;
+        let mut _crop_b = 0u32;
         if crop {
-            crop_l = r.ue()?;
-            crop_r = r.ue()?;
-            crop_t = r.ue()?;
-            crop_b = r.ue()?;
+            _crop_l = r.ue()?;
+            _crop_r = r.ue()?;
+            _crop_t = r.ue()?;
+            _crop_b = r.ue()?;
         }
         Some((
             profile,
@@ -2544,10 +2546,8 @@ fn sps_decode_compatible(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// Extract weighted_pred and weighted_bipred settings from the source's PPS.
-/// Returns (weightp, weightb, cabac) for x264.
 /// Parse weighted_pred and weighted_bipred_idc from a PPS NAL unit.
 /// Returns (weightp, weightb, cabac) for x264.
-
 fn parse_pps_refs(pps: &[u8]) -> Option<usize> {
     let rbsp = nal_rbsp(&pps[1..]);
     let mut r = BitReader::new(&rbsp);
@@ -2555,8 +2555,8 @@ fn parse_pps_refs(pps: &[u8]) -> Option<usize> {
     r.ue(); // sps_id
     r.u(1); // entropy
     r.u(1); // bottom_field
-    let slice_groups = r.ue().unwrap_or(0);
-    if slice_groups > 0 {
+    let _slice_groups = r.ue().unwrap_or(0);
+    if _slice_groups > 0 {
         return None;
     }
     let ref_l0 = r.ue().unwrap_or(0);
@@ -2570,8 +2570,8 @@ fn parse_weighted_pred(pps: &[u8]) -> (u32, u32, bool) {
     r.ue(); // sps_id
     let entropy = r.u(1).unwrap_or(0); // entropy_coding_mode
     r.u(1); // bottom_field_pic_order
-    let slice_groups = r.ue().unwrap_or(0);
-    if slice_groups > 0 {
+    let _slice_groups = r.ue().unwrap_or(0);
+    if _slice_groups > 0 {
         return (1, 0, entropy == 1);
     }
     r.ue(); // num_ref_idx_l0

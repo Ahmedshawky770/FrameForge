@@ -27,8 +27,6 @@ pub struct MpvPlayer {
     window_active: Arc<AtomicBool>,
     /// Generation counter for stale event filtering
     window_generation: Arc<std::sync::Mutex<u64>>,
-    /// mpv event context (transmuted to 'static)
-    event_ctx: Arc<std::sync::Mutex<Option<libmpv::events::EventContext<'static>>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,7 +149,6 @@ impl MpvPlayer {
             app_handle,
             window_active,
             window_generation,
-            event_ctx,
         })
     }
 
