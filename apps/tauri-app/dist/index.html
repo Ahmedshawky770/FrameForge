@@ -1546,7 +1546,7 @@
       .clip-item { flex-wrap: wrap; }
     }
   </style>
-  <script type="module" crossorigin src="/assets/index-9vWtPxV6.js"></script>
+  <script type="module" crossorigin src="/assets/index-CbO4Fum1.js"></script>
 </head>
 <body>
   <a id="skip-to-content" href="#app" data-i18n="skip.content">Skip to main content</a>
@@ -1645,6 +1645,7 @@
         <button class="panel-tab active" id="tab-clips" data-tab="clips" role="tab" aria-selected="true" aria-controls="panel-clips" data-i18n="tab.clips">Clips</button>
         <button class="panel-tab" id="tab-ranges" data-tab="ranges" role="tab" aria-selected="false" aria-controls="delete-ranges-section" data-i18n="tab.ranges">Ranges</button>
         <button class="panel-tab" id="tab-export" data-tab="export" role="tab" aria-selected="false" aria-controls="panel-export" data-i18n="tab.export">Export</button>
+        <button class="panel-tab" id="tab-split" data-tab="split" role="tab" aria-selected="false" aria-controls="panel-split" data-i18n="tab.split">Split</button>
       </div>
 
       <!-- Delete ranges section -->
@@ -1667,6 +1668,22 @@
            </div>
          </div>
          <button id="btn-export-deleted" class="primary" data-i18n="btn.exportDeleted">Export Without Deleted</button>
+      </div>
+
+      <!-- Split video section -->
+      <div id="panel-split" data-tab-panel="split" class="panel-section" role="tabpanel" aria-labelledby="tab-split">
+        <h4>Split Video</h4>
+        <div class="delete-range-inputs">
+          <label>From:</label>
+          <input id="split-from" type="text" placeholder="00:00:00.000" />
+          <label>To:</label>
+          <input id="split-to" type="text" placeholder="00:00:00.000" />
+          <label>Name:</label>
+          <input id="split-name" type="text" placeholder="part1.mp4" />
+          <button id="btn-add-split">Add</button>
+        </div>
+        <ul id="split-list" role="list"></ul>
+        <button id="btn-split-export" class="primary">Split & Export</button>
       </div>
 
       <!-- Clip list -->

@@ -1644,6 +1644,7 @@
         <button class="panel-tab active" id="tab-clips" data-tab="clips" role="tab" aria-selected="true" aria-controls="panel-clips" data-i18n="tab.clips">Clips</button>
         <button class="panel-tab" id="tab-ranges" data-tab="ranges" role="tab" aria-selected="false" aria-controls="delete-ranges-section" data-i18n="tab.ranges">Ranges</button>
         <button class="panel-tab" id="tab-export" data-tab="export" role="tab" aria-selected="false" aria-controls="panel-export" data-i18n="tab.export">Export</button>
+        <button class="panel-tab" id="tab-split" data-tab="split" role="tab" aria-selected="false" aria-controls="panel-split" data-i18n="tab.split">Split</button>
       </div>
 
       <!-- Delete ranges section -->
@@ -1666,6 +1667,22 @@
            </div>
          </div>
          <button id="btn-export-deleted" class="primary" data-i18n="btn.exportDeleted">Export Without Deleted</button>
+      </div>
+
+      <!-- Split video section -->
+      <div id="panel-split" data-tab-panel="split" class="panel-section" role="tabpanel" aria-labelledby="tab-split">
+        <h4>Split Video</h4>
+        <div class="delete-range-inputs">
+          <label>From:</label>
+          <input id="split-from" type="text" placeholder="00:00:00.000" />
+          <label>To:</label>
+          <input id="split-to" type="text" placeholder="00:00:00.000" />
+          <label>Name:</label>
+          <input id="split-name" type="text" placeholder="part1.mp4" />
+          <button id="btn-add-split">Add</button>
+        </div>
+        <ul id="split-list" role="list"></ul>
+        <button id="btn-split-export" class="primary">Split & Export</button>
       </div>
 
       <!-- Clip list -->
@@ -1797,6 +1814,7 @@
         'tab.clips': 'Clips',
         'tab.ranges': 'Ranges',
         'tab.export': 'Export',
+        'tab.split': 'Split',
         'tab.sections': 'Project sections',
         'label.project': 'Project',
         'skip.content': 'Skip to main content',
@@ -1901,6 +1919,7 @@
         'tab.clips': 'مقاطع',
         'tab.ranges': 'فترات',
         'tab.export': 'تصدير',
+        'tab.split': 'تقسيم',
         'tab.sections': 'أقسام المشروع',
         'label.project': 'المشروع',
         'skip.content': 'تخطي إلى المحتوى الرئيسي',
@@ -2165,7 +2184,7 @@
         }
         updateDurationCounter();
         // Preview edited: skip deleted ranges during playback.
-        if ((previewEdited || aroundCutRunning) && isPlaying && !isScrubbing && !isSeekProtected()) {
+        if (previewEdited && isPlaying && !isScrubbing && !isSeekProtected()) {
           for (const r of deleteRanges) {
             if (currentDisplayTime >= r.start && currentDisplayTime < r.end) {
               const target = r.end;
@@ -3267,6 +3286,7 @@ const elsPlaceholder = document.getElementById('placeholder');
       // Timeline bar click
       const elsTimelineBar = document.getElementById('timeline-bar');
       elsTimelineBar.addEventListener('click', async (e) => {
+        if (aroundCutRunning) { aroundCutCancel = true; invoke('player_clear_window').catch(() => {}); }
         if (!duration) return;
         const rect = elsTimelineBar.getBoundingClientRect();
         const dir = document.documentElement.dir;
@@ -4183,6 +4203,49 @@ const elsPlaceholder = document.getElementById('placeholder');
         scheduleSync();
       } catch (e) { toast(t('msg.merge-failed', { error: e })); }
       finally { setExportBusy(false); }
+    });
+
+    /* ============================================================
+       SPLIT VIDEO FEATURE
+       ============================================================ */
+    let splitSegments = [];
+    function renderSplitList() {
+      const list = document.getElementById('split-list');
+      if (!list) return;
+      list.innerHTML = '';
+      splitSegments.forEach((sp, idx) => {
+        const li = document.createElement('li');
+        li.textContent = `${formatSeconds(sp.start)} - ${formatSeconds(sp.end)} -> ${sp.name}`;
+        const btn = document.createElement('button');
+        btn.textContent = '\u00d7';
+        btn.addEventListener('click', () => { splitSegments.splice(idx, 1); renderSplitList(); });
+        li.appendChild(btn);
+        list.appendChild(li);
+      });
+    }
+    document.getElementById('btn-add-split')?.addEventListener('click', () => {
+      if (!currentFile) { toast(t('msg.no-video')); return; }
+      const s = parseSeconds(document.getElementById('split-from').value);
+      const e = parseSeconds(document.getElementById('split-to').value);
+      const name = document.getElementById('split-name').value.trim();
+      if (!duration || e <= s || e > duration) { toast(t('msg.invalid-range')); return; }
+      if (!name) { toast('Enter output name'); return; }
+      splitSegments.push({ start: s, end: e, name });
+      renderSplitList();
+    });
+    document.getElementById('btn-split-export')?.addEventListener('click', async () => {
+      if (!currentFile || splitSegments.length === 0) { toast(t('msg.no-delete-ranges')); return; }
+      const dir = String(currentFile).replace(/\\/g, '/').replace(/[^\/]*$/, '');
+      const segs = splitSegments.map(sp => ({ start: sp.start, end: sp.end, output_path: dir + sp.name }));
+      setExportBusy(true);
+      try {
+        await invoke('split_video', { sourcePath: currentFile, segments: segs });
+        toast('Split export complete');
+      } catch (err) {
+        toast(t('msg.export-failed', { error: err }));
+      } finally {
+        setExportBusy(false);
+      }
     });
 
     init().catch((e) => console.error('init failed', e));

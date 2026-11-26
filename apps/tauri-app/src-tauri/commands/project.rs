@@ -728,10 +728,8 @@ pub async fn project_export_delete_ranges(
     }
 
     // Write concat demuxer list.
-    let list_path = std::env::temp_dir().join(format!(
-        "frameforge_concat_{}.txt",
-        std::process::id()
-    ));
+    let list_path =
+        std::env::temp_dir().join(format!("frameforge_concat_{}.txt", std::process::id()));
     {
         use std::io::Write;
         let mut f = std::fs::File::create(&list_path)
@@ -777,6 +775,67 @@ pub async fn project_export_delete_ranges(
         return Err(format!("ffmpeg concat export failed with status {status}"));
     }
     Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SplitSegment {
+    pub start: f64,
+    pub end: f64,
+    pub output_path: String,
+}
+
+/// Split a source video into multiple output files by time ranges.
+#[command]
+pub async fn split_video(source_path: String, segments: Vec<SplitSegment>) -> Result<(), String> {
+    if source_path.is_empty() {
+        return Err("source_path is empty".into());
+    }
+    if segments.is_empty() {
+        return Err("no split segments provided".into());
+    }
+    let src = source_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        for (i, seg) in segments.iter().enumerate() {
+            if seg.end <= seg.start {
+                return Err(format!("segment {}: end must be > start", i));
+            }
+            if seg.output_path.is_empty() {
+                return Err(format!("segment {}: output_path empty", i));
+            }
+            // Ensure output has a container extension (ffmpeg needs it).
+            let mut out_path = seg.output_path.clone();
+            if std::path::Path::new(&out_path).extension().is_none() {
+                out_path.push_str(".mp4");
+            }
+            // Ensure parent directory exists.
+            if let Some(parent) = std::path::Path::new(&out_path).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let status = std::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-v")
+                .arg("error")
+                .arg("-ss")
+                .arg(format!("{:.6}", seg.start))
+                .arg("-i")
+                .arg(&src)
+                .arg("-t")
+                .arg(format!("{:.6}", seg.end - seg.start))
+                .arg("-c")
+                .arg("copy")
+                .arg("-movflags")
+                .arg("+faststart")
+                .arg(&out_path)
+                .status()
+                .map_err(|e| format!("ffmpeg failed to start: {e}"))?;
+            if !status.success() {
+                return Err(format!("split segment {} failed: {}", i, status));
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("split task failed: {e}"))?
 }
 
 // ---------------------------------------------------------------------------
