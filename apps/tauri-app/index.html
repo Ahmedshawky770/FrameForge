@@ -115,8 +115,6 @@
       --text: #111111;
       --text-muted: #3f3f3f;
       --text-subtle: #555555;
-      --text-muted: #4b5563;
-      --text-subtle: #6b7280;
       --accent: #c2410c;
       --accent-hover: #9a3412;
       --accent-active: #7c2d12;
@@ -381,8 +379,7 @@
       box-sizing: border-box;
       min-width: 0;
     }
-    #project-panel { grid-row: 1; grid-column: 2; position: relative; z-index: 100; padding: var(--space-4); background: var(--surface); border-left: 1px solid var(--border); pointer-events: auto; overflow-y: auto; box-sizing: border-box; min-height: 0; }
-    #project-panel { container-type: inline-size; }
+    #project-panel { grid-row: 1; grid-column: 2; position: relative; z-index: 100; padding: var(--space-4); background: var(--surface); border-left: 1px solid var(--border); pointer-events: auto; overflow-y: auto; box-sizing: border-box; min-height: 0; container-type: inline-size; }
     #timeline.hidden { transform: translateY(100%); }
     #timeline.visible { transform: translateY(0); transition: transform var(--transition-slow); }
 
