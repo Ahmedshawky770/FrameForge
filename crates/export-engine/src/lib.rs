@@ -1919,19 +1919,35 @@ fn remux_segment(
         })?;
     }
 
-    // Advance base offsets to the last written PTS/DTS of this segment (+1) so the
-    // next segment starts strictly after this one.
+    // Advance base offsets.  Use the wall-clock segment duration as the primary
+    // step so audio and video stay in sync across segments (per-stream frame
+    // durations differ and can drift).  Fall back to the observed frame
+    // duration / +1 when the wall-clock step is unavailable, and never move
+    // backwards past the last written packet.
+    let seg_duration_seconds = (seg_end_seconds - seg_start_seconds).max(0.0);
     for (i, p) in last_final_pts
         .iter()
         .enumerate()
         .take(ctx.base_offsets.len())
     {
         if let Some(p) = p {
-            let dur = match (second_last_final_pts[i], *p) {
+            let tb_sec = ctx
+                .octx
+                .stream(i)
+                .map(|s| s.time_base().0 as f64 / s.time_base().1 as f64)
+                .unwrap_or(0.0);
+            let wall_ticks = if tb_sec > 0.0 {
+                (seg_duration_seconds / tb_sec).round() as i64
+            } else {
+                0
+            };
+            let frame_dur = match (second_last_final_pts[i], *p) {
                 (Some(prev), cur) if cur > prev => (cur - prev).max(1),
                 _ => 1,
             };
-            ctx.base_offsets[i] = p + dur;
+            let candidate = (*p + frame_dur).max(ctx.base_offsets[i] + 1);
+            let wall_candidate = ctx.base_offsets[i] + wall_ticks.max(1);
+            ctx.base_offsets[i] = candidate.max(wall_candidate);
         }
     }
     for (i, d) in last_final_dts
@@ -1940,11 +1956,23 @@ fn remux_segment(
         .take(ctx.base_dts_offsets.len())
     {
         if let Some(d) = d {
-            let dur = match (second_last_final_dts[i], *d) {
+            let tb_sec = ctx
+                .octx
+                .stream(i)
+                .map(|s| s.time_base().0 as f64 / s.time_base().1 as f64)
+                .unwrap_or(0.0);
+            let wall_ticks = if tb_sec > 0.0 {
+                (seg_duration_seconds / tb_sec).round() as i64
+            } else {
+                0
+            };
+            let frame_dur = match (second_last_final_dts[i], *d) {
                 (Some(prev), cur) if cur > prev => (cur - prev).max(1),
                 _ => 1,
             };
-            ctx.base_dts_offsets[i] = d + dur;
+            let candidate = (*d + frame_dur).max(ctx.base_dts_offsets[i] + 1);
+            let wall_candidate = ctx.base_dts_offsets[i] + wall_ticks.max(1);
+            ctx.base_dts_offsets[i] = candidate.max(wall_candidate);
         }
     }
 

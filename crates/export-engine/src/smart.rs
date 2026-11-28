@@ -1051,6 +1051,7 @@ fn smart_render_multiple_files(
     let mut last_pts: i64 = i64::MIN;
     let mut last_dts: i64 = i64::MIN;
 
+    let mut audio_cumulative_seconds: f64 = 0.0;
     for (seg_idx, segment) in plan.segments.iter().enumerate() {
         if cancel.is_cancelled() {
             return Err(FrameForgeError::Export("export cancelled".into()));
@@ -1223,6 +1224,17 @@ fn smart_render_multiple_files(
             &mut audio_transcoders,
             cancel,
         )?;
+
+        audio_cumulative_seconds += (seg_end - seg_start).max(0.0);
+        for t in audio_transcoders.iter_mut().flatten() {
+            let rate = t.time_base.1 as f64;
+            if rate > 0.0 {
+                let target = (audio_cumulative_seconds * rate).round() as i64;
+                if target > t.next_pts {
+                    t.next_pts = target;
+                }
+            }
+        }
 
         progress((seg_idx + 1) as f32 / total_segments);
     }
