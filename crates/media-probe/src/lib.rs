@@ -72,6 +72,7 @@ pub struct StreamInfo {
     pub sample_rate: Option<u32>,
     pub channels: Option<u32>,
     pub profile: Option<String>,
+    pub extradata: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -239,6 +240,17 @@ fn probe_stream(stream: &ffmpeg_next::Stream) -> StreamInfo {
         sample_rate,
         channels,
         profile: None,
+        extradata: unsafe {
+            let ptr = codecpar.as_ptr();
+            if ptr.is_null() || (*ptr).extradata.is_null() || (*ptr).extradata_size <= 0 {
+                None
+            } else {
+                Some(std::slice::from_raw_parts(
+                    (*ptr).extradata,
+                    (*ptr).extradata_size as usize,
+                ).to_vec())
+            }
+        },
     }
 }
 

@@ -101,6 +101,7 @@ pub struct CompatibilityReport {
 pub struct StreamParams {
     pub codec: String,
     pub profile: Option<String>,
+    pub extradata: Option<Vec<u8>>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub fps_num: Option<u32>,
@@ -118,6 +119,7 @@ impl StreamParams {
         StreamParams {
             codec: info.codec.clone(),
             profile: info.profile.clone(),
+            extradata: info.extradata.clone(),
             width: info.width,
             height: info.height,
             fps_num: info.fps_num,
@@ -140,6 +142,9 @@ impl StreamParams {
                 "profile mismatch: {:?} vs {:?}",
                 self.profile, other.profile
             ));
+        }
+        if self.extradata.is_some() && other.extradata.is_some() && self.extradata != other.extradata {
+            reasons.push("extradata (SPS/PPS) mismatch".into());
         }
         if self.width != other.width || self.height != other.height {
             reasons.push(format!(
