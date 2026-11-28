@@ -108,11 +108,13 @@
 
     [data-theme="light"] {
       /* --- Colors (Light) --- */
-      --bg: #f5f5f5;
-      --surface: #ffffff;
-      --surface-hover: #f0f0f0;
-      --surface-active: #e5e5e5;
-      --text: #1a1a1a;
+      --bg: #ebe6dc;
+      --surface: #f2efe8;
+      --surface-hover: #e8e3d9;
+      --surface-active: #ddd6c8;
+      --text: #111111;
+      --text-muted: #3f3f3f;
+      --text-subtle: #555555;
       --text-muted: #4b5563;
       --text-subtle: #6b7280;
       --accent: #c2410c;
@@ -1217,6 +1219,9 @@
     [dir="rtl"] .timeline-thumb {
       transform: translate(50%, -50%);
     }
+    [dir="rtl"] #btn-mute svg {
+      transform: scaleX(-1);
+    }
     [dir="rtl"] .timeline-thumb:hover {
       transform: translate(50%, -50%) scale(1.15);
     }
@@ -1670,8 +1675,8 @@
          <div id="preview-edit-controls">
            <div id="duration-counter">Original 0:00 ← Output 0:00</div>
            <div class="preview-edit-actions">
-             <button id="btn-preview-edit" class="secondary" title="Toggle edited/original preview (P)" data-i18n="btn.previewEdit">Preview: Edited</button>
-             <button id="btn-preview-around-cut" class="secondary" title="Play 3s before and after each cut" data-i18n="btn.previewAroundCut">Around Cut</button>
+             <button id="btn-preview-edit" class="secondary" title="Toggle edited/original preview (P)" data-i18n-title="title.toggleEditedPreview" data-i18n="btn.previewEdit">Preview: Edited</button>
+             <button id="btn-preview-around-cut" class="secondary" title="Play 3s before and after each cut" data-i18n-title="title.playAroundCut" data-i18n="btn.previewAroundCut">Around Cut</button>
            </div>
          </div>
          <button id="btn-export-deleted" class="primary" data-i18n="btn.exportDeleted">Export Without Deleted</button>
@@ -1899,6 +1904,8 @@
         'msg.previewing-cuts': 'Previewing cuts...',
         'msg.invalid-duration': 'Invalid video duration',
         'btn.unmute': 'Unmute',
+        'title.toggleEditedPreview': 'Toggle edited/original preview (P)',
+        'title.playAroundCut': 'Play 3s before and after each cut',
         'app.title': 'FrameForge — Video Player',
         'msg.error': 'Error: {error}',
         'msg.scrub-error': 'Scrub error: {error}',
@@ -2074,6 +2081,8 @@
         'msg.previewing-cuts': 'معاينة نقاط القص...',
         'msg.invalid-duration': 'مدة الفيديو غير صالحة',
         'btn.unmute': 'إلغاء الكتم',
+        'title.toggleEditedPreview': 'تبديل معاينة المُحرَّر/الأصلي (P)',
+        'title.playAroundCut': 'تشغيل 3 ثوانٍ قبل/بعد كل قطع',
         'app.title': 'FrameForge — مشغل الفيديو',
         'msg.error': 'خطأ: {error}',
         'msg.scrub-error': 'خطأ في التمرير: {error}',
@@ -2323,9 +2332,22 @@
       const elsTimelineThumb = document.getElementById('timeline-thumb');
       if (!elsTimelineProgress || !elsTimelineThumb) return;
       const pct = duration > 0 ? ((currentDisplayTime / duration) * 100) : 0;
-      elsTimelineProgress.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-      elsTimelineThumb.style.left = `${Math.max(0, Math.min(100, pct))}%`;
-      if (elsTimelineThumb) elsTimelineThumb.style.transform = 'translate(-50%, -50%)';
+      const rtl = document.documentElement.dir === 'rtl';
+      const clamped = Math.max(0, Math.min(100, pct));
+      elsTimelineProgress.style.width = `${clamped}%`;
+      if (rtl) {
+        elsTimelineProgress.style.marginLeft = 'auto';
+        elsTimelineProgress.style.marginRight = '0';
+        elsTimelineThumb.style.right = `${clamped}%`;
+        elsTimelineThumb.style.left = 'auto';
+        if (elsTimelineThumb) elsTimelineThumb.style.transform = 'translate(50%, -50%)';
+      } else {
+        elsTimelineProgress.style.marginLeft = '';
+        elsTimelineProgress.style.marginRight = '';
+        elsTimelineThumb.style.left = `${clamped}%`;
+        elsTimelineThumb.style.right = 'auto';
+        if (elsTimelineThumb) elsTimelineThumb.style.transform = 'translate(-50%, -50%)';
+      }
       const elsTimelineBar = document.getElementById('timeline-bar');
       if (elsTimelineBar) elsTimelineBar.setAttribute('aria-valuenow', Math.round(pct));
     }
@@ -3540,8 +3562,16 @@ const elsPlaceholder = document.getElementById('placeholder');
 
         const elsTimelineProgress = document.getElementById('timeline-progress');
         const elsTimelineThumb = document.getElementById('timeline-thumb');
-        if (elsTimelineProgress) elsTimelineProgress.style.width = `${pct * 100}%`;
-        if (elsTimelineThumb) elsTimelineThumb.style.left = `${pct * 100}%`;
+        const rtlDrag = document.documentElement.dir === 'rtl';
+        if (elsTimelineProgress) {
+          elsTimelineProgress.style.width = `${pct * 100}%`;
+          if (rtlDrag) { elsTimelineProgress.style.marginLeft = 'auto'; elsTimelineProgress.style.marginRight = '0'; }
+          else { elsTimelineProgress.style.marginLeft = ''; elsTimelineProgress.style.marginRight = ''; }
+        }
+        if (elsTimelineThumb) {
+          if (rtlDrag) { elsTimelineThumb.style.right = `${pct * 100}%`; elsTimelineThumb.style.left = 'auto'; elsTimelineThumb.style.transform = 'translate(50%, -50%)'; }
+          else { elsTimelineThumb.style.left = `${pct * 100}%`; elsTimelineThumb.style.right = 'auto'; elsTimelineThumb.style.transform = 'translate(-50%, -50%)'; }
+        }
         moveTimelineHover(clientX);
       };
 
