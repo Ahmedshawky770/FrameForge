@@ -791,7 +791,7 @@
       max-width: min(260px, calc(100vw - var(--space-8)));
       max-height: 60vh;
       overflow-y: auto;
-      z-index: var(--z-dropdown);
+      z-index: 1000;
       box-shadow: var(--shadow-lg);
       transform-origin: top left;
     }
@@ -1554,15 +1554,15 @@
       .clip-item { flex-wrap: wrap; }
     }
   </style>
-  <script type="module" crossorigin src="/assets/index-CbO4Fum1.js"></script>
+  <script type="module" crossorigin src="/assets/index-Dn5q3mvm.js"></script>
 </head>
 <body>
   <a id="skip-to-content" href="#app" data-i18n="skip.content">Skip to main content</a>
 
   <main id="app" tabindex="-1" role="main">
-    <div id="video-surface" role="region" aria-label="Video player">
+    <div id="video-surface" role="region" aria-label="Video player" data-i18n-aria="aria.videoPlayer">
       <div id="overlay">
-        <div id="play-overlay" role="button" aria-label="Play video" tabindex="0">
+        <div id="play-overlay" role="button" aria-label="Play video" tabindex="0" data-i18n-aria="aria.playVideo">
           <div id="play-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
           <div id="pause-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></div>
         </div>
@@ -1573,7 +1573,7 @@
             <div id="video-progress-thumb"></div>
           </div>
           <div id="video-time">
-            <span id="video-current-time" title="Double-click to edit time">0:00</span> / <span id="video-duration">0:00</span>
+            <span id="video-current-time" title="Double-click to edit time" data-i18n-title="title.doubleClickTime">0:00</span> / <span id="video-duration">0:00</span>
           </div>
         </div>
       </div>
@@ -1582,7 +1582,7 @@
       </div>
       <div id="placeholder" dir="auto" role="status" aria-live="polite"><span data-i18n="status.idle">Idle</span>. <span data-i18n="btn.open">Open File</span>.<br><small id="wayland-hint" style="display:none" data-i18n="hint.wayland">Video renders via mpv X11 embedding. Running on Wayland may degrade performance.</small></div>
     </div>
-    <div id="timeline" role="region" aria-label="Timeline scrubber">
+    <div id="timeline" role="region" aria-label="Timeline scrubber" data-i18n-aria="aria.scrubber">
       <div class="toolbar-group">
         <button id="btn-open" class="primary" aria-label="Open video file" data-i18n="btn.open">Open File</button>
         <button id="btn-play-pause" disabled aria-label="Play/Pause" data-i18n="btn.play">Play/Pause</button>
@@ -1590,7 +1590,7 @@
         <button id="btn-scrub-next" disabled aria-label="Scrub next frame" data-i18n="btn.scrubNext">Next Frame</button>
       </div>
       <div class="toolbar-divider" aria-hidden="true"></div>
-<div class="timeline-bar" id="timeline-bar" role="slider" aria-label="Timeline seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+<div class="timeline-bar" id="timeline-bar" role="slider" aria-label="Timeline seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0" data-i18n-aria="aria.timelineSeek">
          <div id="deleted-overlay" style="position:absolute;inset:0;pointer-events:none;z-index:5;overflow:hidden;"></div>
          <div class="timeline-progress" id="timeline-progress"></div>
         <div class="timeline-markers" id="timeline-markers"></div>
@@ -1605,9 +1605,9 @@
       <div class="toolbar-divider" aria-hidden="true"></div>
       <div class="row" aria-live="polite">
         <label for="time-display" data-i18n="label.time">Time</label>
-        <span id="time-display" title="Double-click to edit time">00:00 / 00:00</span>
+        <span id="time-display" title="Double-click to edit time" data-i18n-title="title.doubleClickTime">00:00 / 00:00</span>
       </div>
-      <div class="latency-badge" id="latency-badge" title="Scrub latency p50/p95" aria-label="Scrub latency">— ms</div>
+      <div class="latency-badge" id="latency-badge" title="Scrub latency p50/p95" aria-label="Scrub latency" data-i18n-title="title.scrubLatency">— ms</div>
       <div class="row">
         <label for="speed-select" data-i18n="label.speed">Speed</label>
         <select id="speed-select" disabled aria-label="Playback speed">
@@ -1620,8 +1620,8 @@
       </div>
       <div class="row" id="volume-row">
         <label for="volume-bar" data-i18n="label.volume">Volume</label>
-        <input type="range" id="volume-bar" min="0" max="1" step="0.05" value="1" aria-label="Volume" />
-        <button id="btn-mute" class="icon" aria-label="Toggle mute" title="Mute/Unmute"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></button>
+        <input type="range" id="volume-bar" min="0" max="1" step="0.05" value="1" aria-label="Volume" data-i18n-aria="label.volume" />
+        <button id="btn-mute" class="icon" aria-label="Toggle mute" title="Mute/Unmute" data-i18n-title="title.muteUnmute"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></button>
       </div>
       <div class="toolbar-divider" aria-hidden="true"></div>
       <div class="toolbar-group">
@@ -1632,18 +1632,18 @@
             <div class="dropdown-item" data-locale="ar" role="option" aria-selected="false" data-i18n="locale.ar">العربية</div>
           </div>
         </div>
-        <button id="btn-digits" aria-label="Toggle Arabic-Indic digits" title="Arabic-Indic digits">123</button>
+        <button id="btn-digits" aria-label="Toggle Arabic-Indic digits" title="Arabic-Indic digits" data-i18n-title="title.arabicDigits">123</button>
         <button id="btn-theme" aria-label="Toggle theme" data-i18n="btn.theme">Theme</button>
-        <button id="btn-fullscreen" disabled aria-label="Toggle fullscreen" title="Fullscreen (F)" data-i18n="btn.fullscreen">Fullscreen</button>
-        <button id="btn-diagnostics" disabled aria-label="Show diagnostics" title="Diagnostics"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+        <button id="btn-fullscreen" disabled aria-label="Toggle fullscreen" title="Fullscreen (F)" data-i18n-title="title.fullscreenF" data-i18n="btn.fullscreen">Fullscreen</button>
+        <button id="btn-diagnostics" disabled aria-label="Show diagnostics" title="Diagnostics" data-i18n-title="title.diagnostics"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
       </div>
       <div id="status" class="status" data-i18n="status.idle" aria-live="polite">Idle</div>
     </div>
 
     <!-- Project panel -->
-    <div id="project-panel" role="region" aria-label="Project editor" aria-expanded="true">
+    <div id="project-panel" role="region" aria-label="Project editor" data-i18n-aria="aria.projectEditor" aria-expanded="true">
       <h3 id="project-heading" data-i18n="label.project">Project</h3>
-      <button id="btn-toggle-panel" class="icon" aria-label="Collapse project panel" title="Collapse/expand panel"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <button id="btn-toggle-panel" class="icon" aria-label="Collapse project panel" data-i18n-aria="btn.collapsePanel" title="Collapse/expand panel" data-i18n-title="title.collapseExpand"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
 
       <!-- Merge button -->
       <button id="btn-show-merge" class="secondary" data-i18n="btn.merge">Merge Videos</button>
@@ -1660,9 +1660,9 @@
       <div id="delete-ranges-section" data-tab-panel="ranges" class="panel-section" role="tabpanel" aria-labelledby="tab-ranges">
         <h4 data-i18n="label.deleteRanges">Delete Ranges</h4>
         <div class="delete-range-inputs">
-          <label>From:</label>
+          <label><span data-i18n="label.from">From</span>:</label>
           <input id="del-from" type="text" placeholder="00:00:00.000" />
-          <label>To:</label>
+          <label><span data-i18n="label.to">To</span>:</label>
           <input id="del-to" type="text" placeholder="00:00:00.000" />
           <button id="btn-add-delete-range" data-i18n="btn.addDeleteRange">Add</button>
         </div>
@@ -1680,32 +1680,32 @@
 
       <!-- Split video section -->
       <div id="panel-split" data-tab-panel="split" class="panel-section" role="tabpanel" aria-labelledby="tab-split">
-        <h4>Split Video</h4>
+        <h4 data-i18n="label.splitTitle">Split Video</h4>
         <div class="delete-range-inputs">
-          <label>From:</label>
+          <label><span data-i18n="label.from">From</span>:</label>
           <input id="split-from" type="text" placeholder="00:00:00.000" />
-          <label>To:</label>
+          <label><span data-i18n="label.to">To</span>:</label>
           <input id="split-to" type="text" placeholder="00:00:00.000" />
-          <label>Name:</label>
+          <label><span data-i18n="label.name">Name</span>:</label>
           <input id="split-name" type="text" placeholder="part1.mp4" />
-          <button id="btn-add-split">Add</button>
+          <button id="btn-add-split" data-i18n="btn.addDeleteRange">Add</button>
         </div>
         <ul id="split-list" role="list"></ul>
-        <button id="btn-split-export" class="primary">Split & Export</button>
+        <button id="btn-split-export" class="primary" data-i18n="btn.splitExport">Split & Export</button>
       </div>
 
       <!-- Clip list -->
       <div id="panel-clips" data-tab-panel="clips" class="panel-section active" role="tabpanel" aria-labelledby="tab-clips">
         <label for="clip-list" data-i18n="label.clips">Clips</label>
-        <div id="clip-list" role="list" aria-label="Clip list">
+        <div id="clip-list" role="list" aria-label="Clip list" data-i18n-aria="aria.clipList">
           <!-- Clip items inserted here by JS -->
         </div>
         <div id="clip-list-empty" role="status" aria-live="polite">
           <div class="empty-state">
             <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 7h5M17 17h5"/></svg>
-            <p>No clips yet</p>
-            <small>Open a video to start editing</small>
-            <button id="btn-open-empty" class="primary">Open File</button>
+            <p data-i18n="label.noClipsYet">No clips yet</p>
+            <small data-i18n="label.openVideoToStart">Open a video to start editing</small>
+            <button id="btn-open-empty" class="primary" data-i18n="btn.open">Open File</button>
           </div>
         </div>
       </div>
@@ -1720,19 +1720,19 @@
       <div class="export-controls panel-section" data-tab-panel="export" role="tabpanel" id="panel-export" aria-labelledby="tab-export">
         <label for="export-encoder" data-i18n="label.encoder">Encoder</label>
         <select id="export-encoder" aria-label="Export encoder">
-          <option value="copy">Copy (lossless stream copy)</option>
-          <option value="x264">x264 (H.264)</option>
-          <option value="x265">x265 (H.265/HEVC)</option>
-          <option value="svtav1">SVT-AV1</option>
-          <option value="vaapi">VAAPI</option>
-          <option value="nvenc">NVENC</option>
+          <option value="copy" data-i18n="encoder.copy">Copy (lossless stream copy)</option>
+          <option value="x264" data-i18n="encoder.x264">x264 (H.264)</option>
+          <option value="x265" data-i18n="encoder.x265">x265 (H.265/HEVC)</option>
+          <option value="svtav1" data-i18n="encoder.svtav1">SVT-AV1</option>
+          <option value="vaapi" data-i18n="encoder.vaapi">VAAPI</option>
+          <option value="nvenc" data-i18n="encoder.nvenc">NVENC</option>
         </select>
 
         <label for="export-preset" data-i18n="label.preset">Preset</label>
         <select id="export-preset" aria-label="Export quality preset">
-          <option value="fast">Fast</option>
-          <option value="medium">Medium</option>
-          <option value="slow">Slow</option>
+          <option value="fast" data-i18n="preset.fast">Fast</option>
+          <option value="medium" data-i18n="preset.medium">Medium</option>
+          <option value="slow" data-i18n="preset.slow">Slow</option>
         </select>
 
         <label for="export-dest" data-i18n="label.destination">Destination</label>
@@ -1741,7 +1741,7 @@
         <div class="export-actions">
           <button id="btn-export" class="primary" data-i18n="btn.export">Export</button>
           <progress id="export-progress" value="0" max="100" style="display:none; width:100%; height:8px; margin:0 var(--space-2);"></progress>
-          <button id="export-cancel-btn" style="display:none; align-self:center;">Cancel Export</button>
+          <button id="export-cancel-btn" style="display:none; align-self:center;" data-i18n="btn.cancelExport">Cancel Export</button>
         </div>
         <button id="btn-save-project" data-i18n="btn.saveProject">Save Project</button>
         <button id="btn-load-project" data-i18n="btn.loadProject">Load Project</button>
@@ -1752,7 +1752,7 @@
     <div id="toast" role="alert" aria-live="assertive"></div>
 
     <!-- Drag & Drop indicator -->
-    <div id="drag-indicator" role="region" aria-label="Drag and drop reordering">
+    <div id="drag-indicator" role="region" aria-label="Drag and drop reordering" data-i18n-aria="aria.dragDrop">
       <div id="drag-ghost"></div>
     </div>
 
@@ -1763,7 +1763,7 @@
   <div id="diagnostics-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="diagnostics-title" hidden>
     <div class="modal">
       <header>
-        <h2 id="diagnostics-title">Diagnostics</h2>
+        <h2 id="diagnostics-title" data-i18n="title.diagnostics">Diagnostics</h2>
         <button id="btn-close-diagnostics" class="icon" aria-label="Close">✕</button>
       </header>
       <pre id="diagnostics-output"></pre>
@@ -1778,14 +1778,14 @@
       <button id="btn-merge-add" class="primary" data-i18n="btn.mergeAdd">Add Videos</button>
       <button id="btn-merge-export" class="success" data-i18n="btn.mergeExport">Merge & Export</button>
     </header>
-    <div id="merge-list" role="list" aria-label="Merge list">
+    <div id="merge-list" role="list" aria-label="Merge list" data-i18n-aria="aria.mergeList">
       <!-- Merge items inserted here by JS -->
     </div>
-    <div id="merge-empty" role="status" aria-live="polite" data-i18n="label.mergeEmpty">
+    <div id="merge-empty" role="status" aria-live="polite">
           <div class="empty-state">
             <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-            <p>No videos added</p>
-            <small>Click "Add Videos" to select files</small>
+            <p data-i18n="label.noVideosAdded">No videos added</p>
+            <small data-i18n="label.clickAddVideos">Click "Add Videos" to select files</small>
           </div>
         </div>
   </div>
